@@ -33,13 +33,30 @@ jobs:
       - name: Package KernelSU zip
         run: |
           set -eu
-          STAGE=$(mktemp -d)
-          cp -a kmod/module/. "$STAGE"/
-          cp kmod/adbhide_kmod.ko "$STAGE"/
-          chmod 0755 "$STAGE"/*.sh
-          chmod 0644 "$STAGE/module.prop" "$STAGE/adbhide_kmod.ko"
-          (cd "$STAGE" && zip -qr "$GITHUB_WORKSPACE/adbhide-kmod-$KMI.zip" .)
-          unzip -l "$GITHUB_WORKSPACE/adbhide-kmod-$KMI.zip"
+          python3 - <<'PY'
+          import os, stat, zipfile
+
+          out = os.environ.get("ZIP_NAME", "adbhide-kmod-android15-6.6.zip")
+          stage = "kmod/module"
+          with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+              for root, _dirs, files in os.walk(stage):
+                  for f in sorted(files):
+                      p = os.path.join(root, f)
+                      arc = os.path.relpath(p, stage)
+                      zi = zipfile.ZipInfo(arc)
+                      zi.external_attr = (stat.S_IFREG | (0o755 if f.endswith(".sh") else 0o644)) << 16
+                      zi.compress_type = zipfile.ZIP_DEFLATED
+                      z.writestr(zi, open(p, "rb").read())
+              zi = zipfile.ZipInfo("adbhide_kmod.ko")
+              zi.external_attr = (stat.S_IFREG | 0o644) << 16
+              zi.compress_type = zipfile.ZIP_DEFLATED
+              z.writestr(zi, open("kmod/adbhide_kmod.ko", "rb").read())
+
+          with zipfile.ZipFile(out) as z:
+              print(out, os.path.getsize(out), "bytes")
+              for i in z.infolist():
+                  print("  %-22s %7d  mode=%o" % (i.filename, i.file_size, (i.external_attr >> 16) & 0o777))
+          PY
 
       - uses: actions/upload-artifact@v4
         with:
