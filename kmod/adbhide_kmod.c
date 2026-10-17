@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/utsname.h>
 #include <linux/version.h>
 
 #define ADBHIDE_KVER "0.1.0"
