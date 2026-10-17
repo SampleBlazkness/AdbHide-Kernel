@@ -10,7 +10,7 @@ ifeq ($(KERNELRELEASE),)
 
 ARCH ?= arm64
 KERNEL_SRC ?= $(if $(KDIR),$(KDIR),/opt/ddk/kdir/android15-6.6)
-CLANG_DIR ?= $(shell ls -d /opt/ddk/clang/clang-r* 2>/dev/null | tail -1)
+CLANG_DIR ?= $(shell d=$$(ls -d /opt/ddk/clang/clang-r* 2>/dev/null | tail -1); [ -x "$$d/bin/clang" ] && echo "$$d/bin" || echo "$$d")
 
 CC      := $(CLANG_DIR)/clang
 LD      := $(CLANG_DIR)/ld.lld
