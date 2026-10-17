@@ -1,0 +1,48 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  kmod:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ylarod/ddk-min:android15-6.6-20260313
+    env:
+      KMI: android15-6.6
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain sanity
+        run: |
+          set -eu
+          echo "kernel: $(ls -d /opt/ddk/kdir/* 2>/dev/null | tr '\n' ' ')"
+          echo "clang:  $(ls -d /opt/ddk/clang/clang-r* 2>/dev/null | tail -1)"
+
+      - name: Build module
+        run: |
+          set -eu
+          make -C kmod strip
+          file kmod/adbhide_kmod.ko
+          ls -l kmod/adbhide_kmod.ko
+
+      - name: Package KernelSU zip
+        run: |
+          set -eu
+          STAGE=$(mktemp -d)
+          cp -a kmod/module/. "$STAGE"/
+          cp kmod/adbhide_kmod.ko "$STAGE"/
+          chmod 0755 "$STAGE"/*.sh
+          chmod 0644 "$STAGE/module.prop" "$STAGE/adbhide_kmod.ko"
+          (cd "$STAGE" && zip -qr "$GITHUB_WORKSPACE/adbhide-kmod-$KMI.zip" .)
+          unzip -l "$GITHUB_WORKSPACE/adbhide-kmod-$KMI.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adbhide-kmod-${{ env.KMI }}
+          path: adbhide-kmod-${{ env.KMI }}.zip
+          if-no-files-found: error

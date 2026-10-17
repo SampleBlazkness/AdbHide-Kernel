@@ -1,0 +1,6 @@
+id=adbhide_kmod
+name=AdbHide (Kernel)
+version=v0.1.0
+versionCode=1
+author=Blazkness
+description=Kernel-level ADB hiding for selected apps. Loads adbhide_kmod.ko; target uids come from /data/adb/adbhide/uids.txt.
