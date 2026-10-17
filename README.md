@@ -27,17 +27,25 @@ Both are file- and kernel-level facts. This module changes them there instead:
 
 ```
 kmod/
-  adbhide_kmod.c        kernel module
-  Makefile              Kbuild + DDK build entry
-  module/               KernelSU module packaging (module.prop, scripts)
-.github/workflows/      CI: build in ghcr.io/ylarod/ddk-min:android15-6.6-*
+  adbhide.h              shared types and prototypes
+  adbhide_main.c         init/exit, /proc/adbhide_kmod, event ring
+  adbhide_uids.c         target uid list, counters
+  adbhide_probes.c       kprobes: vfs_open, seq_read
+  Makefile               Kbuild + DDK build entry
+  module/                KernelSU module packaging (module.prop, scripts)
+app/
+  src/                   LSPosed module + status activity
+  stubs/                 Xposed API stubs, compile-time only, never packaged
+  res/, assets/          xposed_scope array, xposed_init
+tools/build-apk.sh       aapt2 -> javac -> d8 -> apksigner, no Gradle
+.github/workflows/       CI: build in ghcr.io/ylarod/ddk-min:android15-6.6-*
 ```
 
 ## Status
 
 - [x] M0 — repository, license, CI skeleton
-- [ ] M1 — minimal module loads, `/proc/adbhide_kmod` readable
-- [ ] M2 — read-only probes (no behaviour change), stability run
+- [x] M1 — minimal module loads, `/proc/adbhide_kmod` readable
+- [ ] M2 — read-only probes (code complete, device verification pending)
 - [ ] M3 — property redirect for one key, verified with `getprop`
 - [ ] M4 — `/proc/net/tcp` filtering
 - [ ] M5 — config integration, package, drop the Zygisk module

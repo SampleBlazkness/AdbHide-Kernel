@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- LSPosed preselects these at install time: the system framework scope is
+         what makes the SettingsProvider layer work with no user action. -->
+    <string-array name="xposed_scope">
+        <item>android</item>
+    </string-array>
+</resources>
