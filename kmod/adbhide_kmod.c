@@ -19,7 +19,7 @@
 static int adbhide_proc_show(struct seq_file *m, void *v)
 {
 	seq_printf(m, "adbhide_kmod %s\n", ADBHIDE_KVER);
-	seq_printf(m, "kernel %s\n", UTS_RELEASE);
+	seq_printf(m, "kernel %s\n", init_uts_ns.name.release);
 	seq_printf(m, "uid_file %s\n", ADBHIDE_UID_FILE);
 	seq_puts(m, "mode probe\n");
 	return 0;
