@@ -8,4 +8,7 @@ Module.symvers
 modules.order
 kmod/.adbhide_kmod.*
 kmod/adbhide_kmod.ko
+build/
+dist/
 *.zip
+*.apk
