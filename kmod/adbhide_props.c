@@ -231,6 +231,8 @@ static void blob_work_fn(struct work_struct *w)
 {
 	struct ab_blob *nb = load_prop_blob(PROP_CTX_FILE);
 
+	pr_info_ratelimited("adbhide_kmod: blob worker: %s\n",
+			    IS_ERR(nb) ? "load failed" : "snapshot refreshed");
 	if (!IS_ERR(nb)) {
 		struct ab_blob *old;
 
@@ -468,6 +470,7 @@ int adbhide_props_init(void)
 	}
 
 	g_redirect_state = 1;
+	schedule_delayed_work(&blob_work, 8 * HZ);
 	pr_info("adbhide_kmod: redirect armed on %s\n", PROP_CTX_FILE);
 	return 0;
 }
