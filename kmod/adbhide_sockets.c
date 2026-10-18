@@ -307,17 +307,6 @@ static int connect_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 
 	d->hit = false;
 	d->adbd = false;
-	{
-		static int dbg_n;
-		struct sockaddr_un *du = (struct sockaddr_un *)addr;
-
-		if (dbg_n < 20 && addr && addr->sa_family == AF_UNIX &&
-		    len > 12 && !memcmp(du->sun_path, "/dev/socket/", 12)) {
-			dbg_n++;
-			pr_info("adbhide dbg: uid=%u len=%d path=%s\n",
-				adbhide_uid_now(), len, du->sun_path);
-		}
-	}
 	if (!adbhide_target_count())
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
@@ -374,14 +363,6 @@ static int lsm_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	int len = (int)regs_get_kernel_argument(regs, 2);
 
 	d->hit = false;
-	{
-		static int n;
-		if (n < 5 && adbhide_uid_is_target(adbhide_uid_now())) {
-			n++;
-			pr_info("adbhide dbg: lsm connect uid=%u len=%d\n",
-				adbhide_uid_now(), len);
-		}
-	}
 	if (!adbhide_target_count())
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
