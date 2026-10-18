@@ -378,8 +378,7 @@ static int lsm_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 		static int n;
 		if (n < 5 && adbhide_uid_is_target(adbhide_uid_now())) {
 			n++;
-			pr_info("adbhide dbg: lsm connect uid=%u len=%d
-",
+			pr_info("adbhide dbg: lsm connect uid=%u len=%d\n",
 				adbhide_uid_now(), len);
 		}
 	}
