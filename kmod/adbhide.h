@@ -30,6 +30,7 @@ enum adbhide_counter {
 	CNT_PROP_OPEN = 0,
 	CNT_TCP_READ,
 	CNT_TCP6_READ,
+	CNT_REDIRECT,
 	CNT_MAX,
 };
 
@@ -46,5 +47,10 @@ extern const char *const adbhide_probe_names[2];
 
 int adbhide_probes_register(void);
 void adbhide_probes_unregister(void);
+
+/* adbhide_props.c (M3) */
+int adbhide_props_init(void);
+void adbhide_props_exit(void);
+int adbhide_redirect_active(void);
 
 #endif
