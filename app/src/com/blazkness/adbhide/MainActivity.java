@@ -11,6 +11,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.text.util.Linkify;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -143,6 +144,7 @@ public class MainActivity extends Activity {
 
     private void refresh() {
         status.setText(readState());
+        Linkify.addLinks(status, Linkify.WEB_URLS);
     }
 
     private String readState() {
@@ -258,6 +260,10 @@ public class MainActivity extends Activity {
         sb.append("  ✅ 系统设置层(Settings.Global)\n");
         sb.append("     由 LSPosed 作用域「系统框架」提供,\n");
         sb.append("     本应用不需要被注入。\n");
+
+        sb.append('\n');
+        sb.append("作者 Blazkness\n");
+        sb.append("github.com/SampleBlazkness/AdbHide-Kernel\n");
 
         sb.append('\n');
         sb.append("不在保护范围\n");
