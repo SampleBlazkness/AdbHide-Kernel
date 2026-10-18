@@ -151,6 +151,15 @@ static int inode_permission_entry(struct kretprobe_instance *ri,
 		return 0;
 	if (!adbhide_target_count() || !adbhide_uid_is_target(adbhide_uid_now()))
 		return 0;
+	if (S_ISSOCK(inode->i_mode)) {
+		static int ino_dbg;
+		if (ino_dbg < 3) {
+			ino_dbg++;
+			pr_info("adbhide dbg: ino=%lu adbd_ino=%lu match=%d\n",
+				inode->i_ino, adbd_ino,
+				inode->i_ino == adbd_ino);
+		}
+	}
 	if (!S_ISSOCK(inode->i_mode) || inode->i_ino != adbd_ino)
 		return 0;
 	if (adbd_sb && inode->i_sb != adbd_sb)
@@ -375,8 +384,14 @@ static int lsm_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
 		return 0;
-	if (is_adbd_sock(addr, len))
+	if (is_adbd_sock(addr, len)) {
+		static int hit_dbg;
 		d->hit = true;
+		if (hit_dbg < 3) {
+			hit_dbg++;
+			pr_info("adbhide dbg: lsm HIT\n");
+		}
+	}
 	return 0;
 }
 
