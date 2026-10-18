@@ -8,8 +8,12 @@
 //
 //   kretprobe vfs_open -> if a target uid just opened a property file, swap
 //   file->f_op for ours; every later read()/mmap() then serves a patched copy
-//   held in kernel memory. The real file is untouched, and the process's maps
-//   show the same path and the same sparse file, so nothing looks synthetic.
+//   held in kernel memory. The real file is untouched and the process's maps
+//   still show the same path, so nothing looks synthetic.
+//
+// The copy is taken lazily, on first use, and refreshed every few seconds: at
+// post-fs-data time the property service has not yet written values such as
+// sys.usb.config, so a boot-time snapshot would be missing them.
 //
 // Only usb_control_prop (sys.usb.config / sys.usb.state) is patched for now.
 
@@ -26,11 +30,14 @@
 #include <linux/uaccess.h>
 #include <linux/uio.h>
 #include <linux/string.h>
+#include <linux/mutex.h>
+#include <linux/jiffies.h>
 #include <linux/version.h>
 #include "adbhide.h"
 
 #define PROP_CTX_FILE "u:object_r:usb_control_prop:s0"
 #define PROP_DIR      "__properties__"
+#define BLOB_TTL      (2 * HZ)
 
 static int redirect;
 module_param(redirect, int, 0444);
@@ -43,7 +50,9 @@ struct ab_blob {
 };
 
 static struct ab_blob *g_blob;
-static int g_redirect_state;   /* 0 off, 1 active, negative = error */
+static unsigned long g_blob_ts;
+static DEFINE_MUTEX(blob_lock);
+static int g_redirect_state;   /* 1 = hook armed */
 
 /* ---------- property area parsing (bionic layout) ---------- */
 
@@ -66,62 +75,70 @@ static int cmp_prop_name(const char *one, u32 one_len, const char *two, u32 two_
 	return strncmp(one, two, one_len);
 }
 
+/*
+ * The root node is a dummy: the first name token lives in root->children, and
+ * every further token in the previous node's children.
+ */
 static const u8 *find_prop_info(const u8 *data, const char *name)
 {
 	const char *remaining = name;
-	const u8 *node = data;
+	const u8 *cur = data;
 
 	for (;;) {
 		const char *sep = strchr(remaining, '.');
 		u32 tok_len = sep ? (u32)(sep - remaining) : (u32)strlen(remaining);
-		const u8 *cur = node;
+		const u8 *node, *hit = NULL;
+		u32 off;
 
-		while (cur) {
-			u32 nl = rd32(cur);
-			const char *nname = (const char *)(cur + PROP_TRIE_NAME);
-			int ret = cmp_prop_name(remaining, tok_len, nname, nl);
+		if (!tok_len)
+			return NULL;
+		off = rd32(cur + 16);           /* children */
+		if (!off)
+			return NULL;
 
-			if (ret == 0)
+		node = data + off;
+		while (node) {
+			u32 nl = rd32(node);
+			int ret = cmp_prop_name(remaining, tok_len,
+						(const char *)(node + PROP_TRIE_NAME), nl);
+
+			if (ret == 0) {
+				hit = node;
 				break;
-			{
-				u32 off = rd32(cur + (ret < 0 ? 8 : 12));
-				cur = off ? data + off : NULL;
 			}
+			off = rd32(node + (ret < 0 ? 8 : 12));
+			node = off ? data + off : NULL;
 		}
-		if (!cur)
+		if (!hit)
 			return NULL;
 
 		if (!sep) {
-			u32 poff = rd32(cur + 4);
-			return poff ? data + poff : NULL;
+			off = rd32(hit + 4);    /* prop */
+			return off ? data + off : NULL;
 		}
-		{
-			u32 child = rd32(cur + 16);
-			if (!child)
-				return NULL;
-			node = data + child;
-		}
+		cur = hit;
 		remaining = sep + 1;
 	}
 }
 
-static void patch_value(u8 *area, size_t len, const char *name, const char *value)
+static bool patch_value(u8 *area, size_t len, const char *name, const char *value)
 {
 	u8 *info;
 
-	if (len < PROP_AREA_HDR + sizeof(u32) * 3)
-		return;
+	if (len < PROP_AREA_HDR + 8)
+		return false;
 	if (rd32(area + 8) != 0x504f5250)     /* PROP_AREA_MAGIC */
-		return;
+		return false;
+
 	info = (u8 *)find_prop_info(area + PROP_AREA_HDR, name);
 	if (!info)
-		return;
+		return false;
 	if ((size_t)(info - area) + PROP_INFO_VAL + PROP_VALUE_MAX > len)
-		return;
+		return false;
 
 	memset(info + PROP_INFO_VAL, 0, PROP_VALUE_MAX);
 	strscpy((char *)(info + PROP_INFO_VAL), value, PROP_VALUE_MAX);
-	pr_info("adbhide_kmod: patched %s -> \"%s\"\n", name, value);
+	return true;
 }
 
 /* ---------- blob ---------- */
@@ -141,11 +158,13 @@ static struct ab_blob *load_prop_blob(const char *ctx)
 	loff_t pos = 0;
 	ssize_t n;
 	size_t cap = 128 * 1024;
+	bool p1, p2;
 
 	snprintf(path, sizeof(path), "/dev/%s/%s", PROP_DIR, ctx);
 	f = filp_open(path, O_RDONLY | O_CLOEXEC, 0);
 	if (IS_ERR(f)) {
-		pr_warn("adbhide_kmod: cannot open %s: %ld\n", path, PTR_ERR(f));
+		pr_warn_ratelimited("adbhide_kmod: cannot open %s: %ld\n",
+				    path, PTR_ERR(f));
 		return ERR_CAST(f);
 	}
 
@@ -165,9 +184,39 @@ static struct ab_blob *load_prop_blob(const char *ctx)
 	}
 	b->len = n;
 
-	/* the values Duck reads through getprop */
-	patch_value(b->data, b->len, "sys.usb.config", "mtp");
-	patch_value(b->data, b->len, "sys.usb.state", "mtp");
+	p1 = patch_value(b->data, b->len, "sys.usb.config", "mtp");
+	p2 = patch_value(b->data, b->len, "sys.usb.state", "mtp");
+	if (!p1)
+		pr_info_ratelimited("adbhide_kmod: sys.usb.config not in snapshot\n");
+	if (p1 || p2)
+		pr_info_ratelimited("adbhide_kmod: snapshot %zu bytes config=%d state=%d\n",
+				    b->len, p1, p2);
+	return b;
+}
+
+/* returns a referenced snapshot, refreshed at most every BLOB_TTL */
+static struct ab_blob *blob_get(void)
+{
+	struct ab_blob *b = NULL;
+
+	mutex_lock(&blob_lock);
+	if (!g_blob || time_after(jiffies, g_blob_ts + BLOB_TTL)) {
+		struct ab_blob *nb = load_prop_blob(PROP_CTX_FILE);
+
+		if (!IS_ERR(nb)) {
+			struct ab_blob *old = g_blob;
+
+			g_blob = nb;
+			g_blob_ts = jiffies;
+			if (old)
+				kref_put(&old->ref, blob_release);
+		}
+	}
+	if (g_blob) {
+		kref_get(&g_blob->ref);
+		b = g_blob;
+	}
+	mutex_unlock(&blob_lock);
 	return b;
 }
 
@@ -175,35 +224,42 @@ static struct ab_blob *load_prop_blob(const char *ctx)
 
 static ssize_t ab_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
-	struct ab_blob *b = file->private_data;
-	size_t left;
+	struct ab_blob *b = blob_get();
+	ssize_t ret = 0;
 
 	if (!b)
 		return -EIO;
-	if (*ppos < 0 || (size_t)*ppos >= b->len)
-		return 0;
+	if (*ppos >= 0 && (size_t)*ppos < b->len) {
+		size_t left = b->len - (size_t)*ppos;
 
-	left = b->len - (size_t)*ppos;
-	if (count > left)
-		count = left;
-	if (copy_to_user(buf, b->data + *ppos, count))
-		return -EFAULT;
-	*ppos += count;
-	return count;
+		if (count > left)
+			count = left;
+		if (copy_to_user(buf, b->data + *ppos, count))
+			ret = -EFAULT;
+		else {
+			*ppos += count;
+			ret = count;
+		}
+	}
+	kref_put(&b->ref, blob_release);
+	return ret;
 }
 
 static ssize_t ab_read_iter(struct kiocb *iocb, struct iov_iter *to)
 {
-	struct ab_blob *b = iocb->ki_filp->private_data;
-	size_t left;
+	struct ab_blob *b = blob_get();
+	ssize_t ret = 0;
 
 	if (!b)
 		return -EIO;
-	if (iocb->ki_pos < 0 || (size_t)iocb->ki_pos >= b->len)
-		return 0;
+	if (iocb->ki_pos >= 0 && (size_t)iocb->ki_pos < b->len) {
+		size_t left = b->len - (size_t)iocb->ki_pos;
 
-	left = b->len - (size_t)iocb->ki_pos;
-	return copy_to_iter(b->data + iocb->ki_pos, min(left, iov_iter_count(to)), to);
+		ret = copy_to_iter(b->data + iocb->ki_pos,
+				   min(left, iov_iter_count(to)), to);
+	}
+	kref_put(&b->ref, blob_release);
+	return ret;
 }
 
 static vm_fault_t ab_fault(struct vm_fault *vmf)
@@ -243,8 +299,10 @@ static void ab_vm_close(struct vm_area_struct *vma)
 {
 	struct ab_blob *b = vma->vm_private_data;
 
-	if (b)
+	if (b) {
+		vma->vm_private_data = NULL;
 		kref_put(&b->ref, blob_release);
+	}
 }
 
 static const struct vm_operations_struct ab_vm_ops = {
@@ -255,15 +313,16 @@ static const struct vm_operations_struct ab_vm_ops = {
 
 static int ab_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	struct ab_blob *b = file->private_data;
+	struct ab_blob *b = blob_get();
 
 	if (!b)
 		return -EIO;
-	if (vma->vm_pgoff)
+	if (vma->vm_pgoff) {
+		kref_put(&b->ref, blob_release);
 		return -EINVAL;
+	}
 
-	kref_get(&b->ref);
-	vma->vm_private_data = b;
+	vma->vm_private_data = b;   /* reference held by the vma */
 	vma->vm_ops = &ab_vm_ops;
 	vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
 	return 0;
@@ -271,12 +330,7 @@ static int ab_mmap(struct file *file, struct vm_area_struct *vma)
 
 static int ab_release(struct inode *inode, struct file *file)
 {
-	struct ab_blob *b = file->private_data;
-
-	if (b) {
-		kref_put(&b->ref, blob_release);
-		file->private_data = NULL;
-	}
+	file->private_data = NULL;
 	return 0;
 }
 
@@ -292,7 +346,7 @@ static const struct file_operations ab_fops = {
 /* ---------- vfs_open kretprobe ---------- */
 
 struct ab_open_data {
-	struct ab_blob *blob;
+	bool wanted;
 	struct file *file;
 };
 
@@ -302,9 +356,10 @@ static int ab_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	struct ab_open_data *d = (struct ab_open_data *)ri->data;
 	struct dentry *dent;
 
-	d->blob = NULL;
+	d->wanted = false;
 	d->file = (struct file *)regs_get_kernel_argument(regs, 1);
-	if (!redirect || !g_blob || !path || !path->dentry)
+
+	if (!redirect || !path || !path->dentry)
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
 		return 0;
@@ -319,9 +374,7 @@ static int ab_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	    memcmp(dent->d_name.name, PROP_CTX_FILE, sizeof(PROP_CTX_FILE) - 1))
 		return 0;
 
-	kref_get(&g_blob->ref);
-	d->blob = g_blob;
-	adbhide_counter_bump(CNT_REDIRECT);
+	d->wanted = true;
 	return 0;
 }
 
@@ -331,27 +384,19 @@ static int ab_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 	struct file *file;
 	long ret = regs_return_value(regs);
 
-	/* no instance available (maxactive exhausted): nothing was prepared */
 	if (!ri)
 		return 0;
 	d = (struct ab_open_data *)ri->data;
-	if (!d->blob)
+	if (!d->wanted || ret != 0)
 		return 0;
-	/* failed open: drop the reference we took, nothing to redirect */
-	if (ret != 0) {
-		kref_put(&d->blob->ref, blob_release);
-		return 0;
-	}
 
 	file = d->file;
-	if (!file) {
-		kref_put(&d->blob->ref, blob_release);
+	if (!file)
 		return 0;
-	}
 
 	file->f_op = &ab_fops;
-	file->private_data = d->blob;
-	d->blob = NULL;
+	file->private_data = NULL;
+	adbhide_counter_bump(CNT_REDIRECT);
 	adbhide_event_add("redir", PROP_CTX_FILE);
 	return 0;
 }
@@ -368,7 +413,6 @@ int adbhide_props_init(void)
 {
 	int ret;
 
-	g_redirect_state = -1;
 	if (!redirect) {
 		pr_info("adbhide_kmod: redirect disabled\n");
 		return 0;
@@ -378,32 +422,20 @@ int adbhide_props_init(void)
 		return 0;
 	}
 
-	g_blob = load_prop_blob(PROP_CTX_FILE);
-	if (IS_ERR(g_blob)) {
-		long err = PTR_ERR(g_blob);
-
-		g_blob = NULL;
-		pr_warn("adbhide_kmod: blob load failed: %ld\n", err);
-		return 0;
-	}
-
 	ret = register_kretprobe(&ab_krp);
 	if (ret) {
 		pr_warn("adbhide_kmod: kretprobe vfs_open failed: %d\n", ret);
-		kref_put(&g_blob->ref, blob_release);
-		g_blob = NULL;
 		return 0;
 	}
 
 	g_redirect_state = 1;
-	pr_info("adbhide_kmod: redirect active on %s (%zu bytes)\n",
-		PROP_CTX_FILE, g_blob->len);
+	pr_info("adbhide_kmod: redirect armed on %s\n", PROP_CTX_FILE);
 	return 0;
 }
 
 void adbhide_props_exit(void)
 {
-	if (g_redirect_state == 1) {
+	if (g_redirect_state) {
 		unregister_kretprobe(&ab_krp);
 		g_redirect_state = 0;
 	}
@@ -415,5 +447,5 @@ void adbhide_props_exit(void)
 
 int adbhide_redirect_active(void)
 {
-	return g_redirect_state == 1;
+	return g_redirect_state;
 }
