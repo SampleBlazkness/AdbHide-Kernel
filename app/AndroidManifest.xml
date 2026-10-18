@@ -22,7 +22,7 @@
             android:value="true" />
         <meta-data
             android:name="xposeddescription"
-            android:value="AdbHide by Blazkness — 隐藏 ADB 调试状态:系统设置层默认生效,内核层按 uid 名单生效。github.com/SampleBlazkness/AdbHide-Kernel" />
+            android:value="隐藏 ADB 调试状态:系统设置层默认生效,内核层按 uid 名单生效" />
         <meta-data
             android:name="xposedminversion"
             android:value="93" />
