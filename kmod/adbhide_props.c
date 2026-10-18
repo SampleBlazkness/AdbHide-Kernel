@@ -150,12 +150,42 @@ static void blob_release(struct kref *ref)
 	kfree(b);
 }
 
+/*
+ * kernel_read() is not usable on property files (the vendor KernelSU hook
+ * rejects it), so pull the pages straight out of the page cache instead.
+ */
+static ssize_t read_prop_file(struct file *f, u8 *dst, size_t cap)
+{
+	struct address_space *mapping = f->f_mapping;
+	size_t done = 0;
+	pgoff_t idx = 0;
+
+	if (!mapping)
+		return -EINVAL;
+
+	while (done < cap) {
+		struct page *pg = read_mapping_page(mapping, idx, f);
+		size_t n;
+		void *k;
+
+		if (IS_ERR(pg))
+			return done ? (ssize_t)done : PTR_ERR(pg);
+		n = min_t(size_t, PAGE_SIZE, cap - done);
+		k = kmap_local_page(pg);
+		memcpy(dst + done, k, n);
+		kunmap_local(k);
+		put_page(pg);
+		done += n;
+		idx++;
+	}
+	return done;
+}
+
 static struct ab_blob *load_prop_blob(const char *ctx)
 {
 	char path[96];
 	struct file *f;
 	struct ab_blob *b;
-	loff_t pos = 0;
 	ssize_t n;
 	size_t cap = 128 * 1024;
 	bool p1, p2;
@@ -176,7 +206,7 @@ static struct ab_blob *load_prop_blob(const char *ctx)
 	kref_init(&b->ref);
 	b->len = cap;
 
-	n = kernel_read(f, b->data, cap, &pos);
+	n = read_prop_file(f, b->data, cap);
 	filp_close(f, NULL);
 	if (n <= 0) {
 		kfree(b);
@@ -335,7 +365,6 @@ static int ab_release(struct inode *inode, struct file *file)
 }
 
 static const struct file_operations ab_fops = {
-	.owner = THIS_MODULE,
 	.llseek = default_llseek,
 	.read = ab_read,
 	.read_iter = ab_read_iter,
