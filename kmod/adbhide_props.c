@@ -206,39 +206,65 @@ static ssize_t ab_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	return copy_to_iter(b->data + iocb->ki_pos, min(left, iov_iter_count(to)), to);
 }
 
+static vm_fault_t ab_fault(struct vm_fault *vmf)
+{
+	struct ab_blob *b = vmf->vma->vm_private_data;
+	unsigned long off = vmf->pgoff << PAGE_SHIFT;
+	struct page *page;
+	void *kaddr;
+	size_t n = 0;
+
+	if (!b)
+		return VM_FAULT_SIGBUS;
+
+	page = alloc_page(GFP_KERNEL | __GFP_ZERO);
+	if (!page)
+		return VM_FAULT_OOM;
+
+	if (off < b->len) {
+		n = min_t(size_t, PAGE_SIZE, b->len - off);
+		kaddr = kmap_local_page(page);
+		memcpy(kaddr, b->data + off, n);
+		kunmap_local(kaddr);
+	}
+	vmf->page = page;
+	return 0;
+}
+
+static void ab_vm_open(struct vm_area_struct *vma)
+{
+	struct ab_blob *b = vma->vm_private_data;
+
+	if (b)
+		kref_get(&b->ref);
+}
+
+static void ab_vm_close(struct vm_area_struct *vma)
+{
+	struct ab_blob *b = vma->vm_private_data;
+
+	if (b)
+		kref_put(&b->ref, blob_release);
+}
+
+static const struct vm_operations_struct ab_vm_ops = {
+	.fault = ab_fault,
+	.open = ab_vm_open,
+	.close = ab_vm_close,
+};
+
 static int ab_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	struct ab_blob *b = file->private_data;
-	unsigned long size = vma->vm_end - vma->vm_start;
-	unsigned long off;
 
 	if (!b)
 		return -EIO;
 	if (vma->vm_pgoff)
 		return -EINVAL;
 
-	for (off = 0; off < size; off += PAGE_SIZE) {
-		struct page *pg = alloc_page(GFP_KERNEL | __GFP_ZERO);
-		void *kaddr;
-		size_t n = 0;
-
-		if (!pg)
-			return -ENOMEM;
-
-		if (off < b->len) {
-			n = min_t(size_t, PAGE_SIZE, b->len - off);
-			kaddr = kmap_local_page(pg);
-			memcpy(kaddr, b->data + off, n);
-			kunmap_local(kaddr);
-		}
-
-		if (vm_insert_page(vma, vma->vm_start + off, pg)) {
-			put_page(pg);
-			return -ENOMEM;
-		}
-		put_page(pg);
-	}
-
+	kref_get(&b->ref);
+	vma->vm_private_data = b;
+	vma->vm_ops = &ab_vm_ops;
 	vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
 	return 0;
 }
@@ -267,6 +293,7 @@ static const struct file_operations ab_fops = {
 
 struct ab_open_data {
 	struct ab_blob *blob;
+	struct file *file;
 };
 
 static int ab_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
@@ -276,6 +303,7 @@ static int ab_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	struct dentry *dent;
 
 	d->blob = NULL;
+	d->file = (struct file *)regs_get_kernel_argument(regs, 1);
 	if (!redirect || !g_blob || !path || !path->dentry)
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
@@ -299,20 +327,23 @@ static int ab_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 
 static int ab_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
-	struct ab_open_data *d = (struct ab_open_data *)ri->data;
+	struct ab_open_data *d;
 	struct file *file;
 	long ret = regs_return_value(regs);
 
+	/* no instance available (maxactive exhausted): nothing was prepared */
+	if (!ri || !ri->data)
+		return 0;
+	d = (struct ab_open_data *)ri->data;
 	if (!d->blob)
 		return 0;
-
 	/* failed open: drop the reference we took, nothing to redirect */
 	if (ret != 0) {
 		kref_put(&d->blob->ref, blob_release);
 		return 0;
 	}
 
-	file = (struct file *)regs_get_kernel_argument(regs, 1);
+	file = d->file;
 	if (!file) {
 		kref_put(&d->blob->ref, blob_release);
 		return 0;
