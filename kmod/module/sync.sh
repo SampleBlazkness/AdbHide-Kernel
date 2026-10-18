@@ -11,7 +11,15 @@ UIDS=/data/adb/adbhide/uids.txt
 
 LIST=""
 if [ -r "$CONF" ]; then
-    PM_LIST=$(pm list packages -U 2>/dev/null)
+    # pm may not answer yet when service.sh runs; wait for it
+    i=0
+    PM_LIST=""
+    while [ $i -lt 12 ]; do
+        PM_LIST=$(pm list packages -U 2>/dev/null)
+        [ -n "$PM_LIST" ] && break
+        i=$((i + 1))
+        sleep 5
+    done
     while IFS= read -r line; do
         case "$line" in ''|'#'*) continue;; esac
         pkg=$(echo "$line" | tr -d ' \r')
