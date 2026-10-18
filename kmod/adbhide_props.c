@@ -164,17 +164,19 @@ static ssize_t read_prop_file(struct file *f, u8 *dst, size_t cap)
 		return -EINVAL;
 
 	while (done < cap) {
-		struct page *pg = read_mapping_page(mapping, idx, f);
-		size_t n;
-		void *k;
+		struct page *pg = find_get_page(mapping, idx);
+		size_t n = min_t(size_t, PAGE_SIZE, cap - done);
 
-		if (IS_ERR(pg))
-			return done ? (ssize_t)done : PTR_ERR(pg);
-		n = min_t(size_t, PAGE_SIZE, cap - done);
-		k = kmap_local_page(pg);
-		memcpy(dst + done, k, n);
-		kunmap_local(k);
-		put_page(pg);
+		if (!pg) {
+			/* not populated: the area beyond bytes_used is unused */
+			memset(dst + done, 0, n);
+		} else {
+			void *k = kmap_local_page(pg);
+
+			memcpy(dst + done, k, n);
+			kunmap_local(k);
+			put_page(pg);
+		}
 		done += n;
 		idx++;
 	}
@@ -209,6 +211,8 @@ static struct ab_blob *load_prop_blob(const char *ctx)
 	n = read_prop_file(f, b->data, cap);
 	filp_close(f, NULL);
 	if (n <= 0) {
+		pr_warn_ratelimited("adbhide_kmod: snapshot read returned %zd
+", n);
 		kfree(b);
 		return ERR_PTR(n ? (long)n : -EIO);
 	}
