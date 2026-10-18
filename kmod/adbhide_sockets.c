@@ -308,11 +308,14 @@ static int connect_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	d->hit = false;
 	d->adbd = false;
 	{
-		static bool dbg_done;
-		if (!dbg_done && addr && adbhide_uid_is_target(adbhide_uid_now())) {
-			dbg_done = true;
-			pr_info("adbhide dbg: fam=%d len=%d raw=%*phN\n",
-				addr->sa_family, len, 24, (const u8 *)addr);
+		static int dbg_n;
+		struct sockaddr_un *du = (struct sockaddr_un *)addr;
+
+		if (dbg_n < 20 && addr && addr->sa_family == AF_UNIX &&
+		    len > 12 && !memcmp(du->sun_path, "/dev/socket/", 12)) {
+			dbg_n++;
+			pr_info("adbhide dbg: uid=%u len=%d path=%s\n",
+				adbhide_uid_now(), len, du->sun_path);
 		}
 	}
 	if (!adbhide_target_count())
