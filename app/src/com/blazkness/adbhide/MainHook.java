@@ -31,8 +31,6 @@ public class MainHook implements IXposedHookLoadPackage {
     private static final String SETTINGS_PKG = "com.android.providers.settings";
     private static final String SPOOF_VALUE = "0";
 
-    /** set when this process got the SystemProperties layer */
-    public static volatile boolean appHooked = false;
 
     private static final String[] SETTINGS_KEYS = {
             "adb_enabled",
@@ -180,7 +178,7 @@ public class MainHook implements IXposedHookLoadPackage {
             }
         });
 
-        appHooked = true;
+        HookState.appHooked = true;
         XposedBridge.log(TAG + ": SystemProperties hooks installed in " + lp.packageName);
     }
 

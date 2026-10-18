@@ -197,9 +197,9 @@ public class MainActivity extends Activity {
         sb.append("     ").append(nz(v.get("KCOUNTERS"))).append('\n');
         sb.append("  ").append(nativeOk ? "✅" : "❌")
                 .append(" adbhide_native ").append(nz(v.get("NATIVEVER"))).append('\n');
-        sb.append("  ").append(MainHook.appHooked ? "✅" : "—")
+        sb.append("  ").append(HookState.appHooked ? "✅" : "—")
                 .append(" LSPosed 已注入本应用")
-                .append(MainHook.appHooked ? "\n" : "(不需要,Settings 层在系统框架里)\n");
+                .append(HookState.appHooked ? "\n" : "(不需要,Settings 层在系统框架里)\n");
 
         sb.append('\n');
         sb.append("不在保护范围\n");
