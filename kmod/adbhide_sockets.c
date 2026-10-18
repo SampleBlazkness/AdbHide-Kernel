@@ -367,8 +367,7 @@ static int lsm_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 		static int seen;
 		if (seen < 5) {
 			seen++;
-			pr_info("adbhide dbg: lsm uid=%u len=%d fam=%d
-",
+			pr_info("adbhide dbg: lsm uid=%u len=%d fam=%d\n",
 				adbhide_uid_now(), len, addr ? addr->sa_family : -1);
 		}
 	}
