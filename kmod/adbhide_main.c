@@ -88,7 +88,10 @@ static int adbhide_proc_show(struct seq_file *m, void *v)
 		   adbhide_counter_get(CNT_TCP_READ),
 		   adbhide_counter_get(CNT_TCP6_READ),
 		   adbhide_counter_get(CNT_REDIRECT),
-		   adbhide_counter_get(CNT_NET_HIDDEN));
+		   adbhide_counter_get(CNT_NET_HIDDEN),
+		   adbhide_counter_get(CNT_SOCK_HIDDEN),
+		   adbhide_counter_get(CNT_UNIX_HIDDEN),
+		   adbhide_counter_get(CNT_MOD_HIDDEN));
 
 	seq_printf(m, "redirect %s\n", adbhide_redirect_active() ? "active" : "off");
 	seq_printf(m, "netseq %s\n", adbhide_netseq_active() ? "active" : "off");
@@ -167,10 +170,11 @@ static int __init adbhide_init(void)
 	adbhide_props_init();
 	adbhide_netseq_init();
 	adbhide_vma_init();
+	adbhide_sockets_init();
 
-	if (!proc_create("adbhide_kmod", 0444, NULL, &adbhide_proc_ops))
+	if (!proc_create("adbhide_kmod", 0400, NULL, &adbhide_proc_ops))
 		pr_warn("adbhide_kmod: /proc entry not created\n");
-	if (!proc_create("adbhide_uids", 0644, NULL, &adbhide_uids_ops))
+	if (!proc_create("adbhide_uids", 0600, NULL, &adbhide_uids_ops))
 		pr_warn("adbhide_kmod: /proc/adbhide_uids not created\n");
 
 	pr_info("adbhide_kmod %s loaded (targets=%d)\n", ADBHIDE_KVER, n);
@@ -181,6 +185,7 @@ static void __exit adbhide_exit(void)
 {
 	remove_proc_entry("adbhide_uids", NULL);
 	remove_proc_entry("adbhide_kmod", NULL);
+	adbhide_sockets_exit();
 	adbhide_vma_exit();
 	adbhide_netseq_exit();
 	adbhide_props_exit();
