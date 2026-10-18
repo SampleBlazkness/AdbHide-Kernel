@@ -265,6 +265,7 @@ static struct kretprobe mod_seq_krp = {
 
 struct conn_data {
 	bool hit;
+	bool adbd;
 };
 
 static bool is_jdwp(struct sockaddr *addr, int addr_len)
@@ -282,6 +283,22 @@ static bool is_jdwp(struct sockaddr *addr, int addr_len)
 	return !memcmp(un->sun_path + 1, "jdwp-control", 12);
 }
 
+/* The adbd socket is a filesystem path, not an abstract name. */
+static bool is_adbd_sock(struct sockaddr *addr, int addr_len)
+{
+	struct sockaddr_un *un = (struct sockaddr_un *)addr;
+
+	if (!addr || addr->sa_family != AF_UNIX)
+		return false;
+	if (addr_len <= offsetof(struct sockaddr_un, sun_path))
+		return false;
+	if (un->sun_path[0] != '/')
+		return false;
+	if (addr_len < offsetof(struct sockaddr_un, sun_path) + 16)
+		return false;
+	return !memcmp(un->sun_path, "/dev/socket/adbd", 16);
+}
+
 static int connect_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 	struct conn_data *d = (struct conn_data *)ri->data;
@@ -289,12 +306,17 @@ static int connect_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	int len = (int)regs_get_kernel_argument(regs, 2);
 
 	d->hit = false;
+	d->adbd = false;
 	if (!adbhide_target_count())
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
 		return 0;
-	if (is_jdwp(addr, len))
+	if (is_jdwp(addr, len)) {
 		d->hit = true;
+	} else if (is_adbd_sock(addr, len)) {
+		d->hit = true;
+		d->adbd = true;
+	}
 	return 0;
 }
 
@@ -302,10 +324,10 @@ static int connect_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 	struct conn_data *d = (struct conn_data *)ri->data;
 
-	if (d->hit && (long)regs_return_value(regs) == 0) {
-		regs_set_return_value(regs, -ECONNREFUSED);
+	if (d->hit && (long)regs_return_value(regs) < 0) {
+		regs_set_return_value(regs, d->adbd ? -ENOENT : -ECONNREFUSED);
 		adbhide_counter_bump(CNT_UNIX_HIDDEN);
-		adbhide_event_add("unix", "jdwp-connect");
+		adbhide_event_add("unix", d->adbd ? "adbd-connect" : "jdwp-connect");
 	}
 	return 0;
 }
