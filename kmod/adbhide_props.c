@@ -239,7 +239,7 @@ static int ab_mmap(struct file *file, struct vm_area_struct *vma)
 		put_page(pg);
 	}
 
-	vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
+	vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
 	return 0;
 }
 
