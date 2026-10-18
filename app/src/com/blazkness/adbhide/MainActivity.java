@@ -44,7 +44,7 @@ public class MainActivity extends Activity {
             "echo NATIVE=$([ -f /data/adb/modules/adbhide_native/zygisk/arm64-v8a.so ] && echo 1 || echo 0)\n" +
             "echo NATIVEVER=$(sed -n 's/^version=//p' /data/adb/modules/adbhide_native/module.prop 2>/dev/null)\n" +
             "echo UIDS=$(tr '\\n' ' ' < /data/adb/adbhide/uids.txt 2>/dev/null)\n" +
-            "echo CONFCOUNT=$(grep -vc '^#' /data/adb/adbhide/blacklist.conf 2>/dev/null)\n" +
+            "echo CONFCOUNT=$(grep -v -e '^#' -e '^$' /data/adb/adbhide/blacklist.conf | wc -l 2>/dev/null)\n" +
             "echo PORTS=$(iptables -S ADBHIDE_PORTS 2>/dev/null | grep -c uid-owner)\n" +
             "echo PORTS6=$(ip6tables -S ADBHIDE_PORTS 2>/dev/null | grep -c uid-owner)\n" +
             "echo MDNS=$(iptables -S ADBHIDE_MDNS_G 2>/dev/null | grep -c string)\n" +
@@ -255,9 +255,9 @@ public class MainActivity extends Activity {
         sb.append("     ").append(nz(v.get("KCOUNTERS"))).append('\n');
         sb.append("  ").append(nativeOk ? "✅" : "❌")
                 .append(" adbhide_native ").append(nz(v.get("NATIVEVER"))).append('\n');
-        sb.append("  ").append(HookState.appHooked ? "✅" : "—")
-                .append(" LSPosed 已注入本应用")
-                .append(HookState.appHooked ? "\n" : "(不需要,Settings 层在系统框架里)\n");
+        sb.append("  ✅ 系统设置层(Settings.Global)\n");
+        sb.append("     由 LSPosed 作用域「系统框架」提供,\n");
+        sb.append("     本应用不需要被注入。\n");
 
         sb.append('\n');
         sb.append("不在保护范围\n");
