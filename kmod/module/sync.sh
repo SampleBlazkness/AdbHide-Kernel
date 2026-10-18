@@ -49,3 +49,24 @@ else
 fi
 
 sh "$MODDIR/rules.sh"
+
+# The app is the parent node: without it the modules say so in their
+# description, so a half-installed stack is visible in the manager.
+HAVE_APK=0
+pm list packages 2>/dev/null | grep -q "^package:com.blazkness.adbhide$" && HAVE_APK=1
+
+set_desc() {
+    _p="$1"
+    [ -f "$_p" ] || return 0
+    _d=$(sed -n 's/^description=//p' "$_p" | head -1)
+    _d=${_d#未安装 AdbHide 核心应用; }
+    if [ "$HAVE_APK" = 1 ]; then
+        _new="$_d"
+    else
+        _new="未安装 AdbHide 核心应用; $_d"
+    fi
+    sed "s|^description=.*|description=$_new|" "$_p" > "$_p.tmp" 2>/dev/null &&         cat "$_p.tmp" > "$_p" && rm -f "$_p.tmp"
+}
+
+set_desc /data/adb/modules/adbhide_kmod/module.prop
+set_desc /data/adb/modules/adbhide_native/module.prop
