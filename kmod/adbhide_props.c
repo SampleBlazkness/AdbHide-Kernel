@@ -51,7 +51,6 @@ struct ab_blob {
 };
 
 static struct ab_blob *g_blob;
-static unsigned long g_blob_ts;
 static DEFINE_MUTEX(blob_lock);
 static int g_redirect_state;   /* 1 = hook armed */
 
