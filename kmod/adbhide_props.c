@@ -38,7 +38,7 @@
 
 #define PROP_CTX_FILE "u:object_r:usb_control_prop:s0"
 #define PROP_DIR      "__properties__"
-#define BLOB_TTL      (2 * HZ)
+#define BLOB_TTL      (5 * HZ)
 
 static int redirect;
 module_param(redirect, int, 0444);
@@ -190,7 +190,7 @@ static struct ab_blob *load_prop_blob(const char *ctx)
 	struct ab_blob *b;
 	ssize_t n;
 	size_t cap = 128 * 1024;
-	bool p1, p2;
+	bool p1;
 
 	snprintf(path, sizeof(path), "/dev/%s/%s", PROP_DIR, ctx);
 	f = filp_open(path, O_RDONLY | O_CLOEXEC, 0);
@@ -218,12 +218,9 @@ static struct ab_blob *load_prop_blob(const char *ctx)
 	b->len = n;
 
 	p1 = patch_value(b->data, b->len, "sys.usb.config", "mtp");
-	p2 = patch_value(b->data, b->len, "sys.usb.state", "mtp");
+	patch_value(b->data, b->len, "sys.usb.state", "mtp");
 	if (!p1)
 		pr_info_ratelimited("adbhide_kmod: sys.usb.config not in snapshot\n");
-	if (p1 || p2)
-		pr_info_ratelimited("adbhide_kmod: snapshot %zu bytes config=%d state=%d\n",
-				    b->len, p1, p2);
 	return b;
 }
 
@@ -231,8 +228,8 @@ static void blob_work_fn(struct work_struct *w)
 {
 	struct ab_blob *nb = load_prop_blob(PROP_CTX_FILE);
 
-	pr_info_ratelimited("adbhide_kmod: blob worker: %s\n",
-			    IS_ERR(nb) ? "load failed" : "snapshot refreshed");
+	if (IS_ERR(nb))
+		pr_warn_ratelimited("adbhide_kmod: blob load failed: %ld\n", PTR_ERR(nb));
 	if (!IS_ERR(nb)) {
 		struct ab_blob *old;
 
@@ -240,7 +237,9 @@ static void blob_work_fn(struct work_struct *w)
 		old = g_blob;
 		g_blob = nb;
 		mutex_unlock(&blob_lock);
-		if (old)
+		if (!old)
+			pr_info("adbhide_kmod: first snapshot %zu bytes\n", nb->len);
+		else
 			kref_put(&old->ref, blob_release);
 	}
 	schedule_delayed_work(to_delayed_work(w), BLOB_TTL);
