@@ -332,7 +332,7 @@ static int ab_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 	long ret = regs_return_value(regs);
 
 	/* no instance available (maxactive exhausted): nothing was prepared */
-	if (!ri || !ri->data)
+	if (!ri)
 		return 0;
 	d = (struct ab_open_data *)ri->data;
 	if (!d->blob)
