@@ -447,6 +447,9 @@ int adbhide_sockets_init(void)
 	r = register_kretprobe(&dgram_connect_krp);
 	if (r)
 		pr_warn("adbhide_kmod: unix_dgram_connect probe failed: %d\n", r);
+	r = register_kretprobe(&lsm_connect_krp);
+	if (r)
+		pr_warn("adbhide_kmod: security_socket_connect probe failed: %d\n", r);
 
 	pr_info("adbhide_kmod: socket hiding %s\n", sock_active ? "on" : "off");
 	return sock_active ? 0 : -ENOENT;
