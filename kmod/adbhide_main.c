@@ -82,13 +82,12 @@ static int adbhide_proc_show(struct seq_file *m, void *v)
 		   adbhide_probe_names[0], adbhide_probe_ok[0] ? "ok" : "failed",
 		   adbhide_probe_names[1], adbhide_probe_ok[1] ? "ok" : "failed");
 
-	seq_printf(m, "counters prop_open=%u tcp_read=%u tcp6_read=%u redirect=%u net_hidden=%u file_hidden=%u\n",
+	seq_printf(m, "counters prop_open=%u tcp_read=%u tcp6_read=%u redirect=%u net_hidden=%u\n",
 		   adbhide_counter_get(CNT_PROP_OPEN),
 		   adbhide_counter_get(CNT_TCP_READ),
 		   adbhide_counter_get(CNT_TCP6_READ),
 		   adbhide_counter_get(CNT_REDIRECT),
-		   adbhide_counter_get(CNT_NET_HIDDEN),
-		   adbhide_counter_get(CNT_FILE_HIDDEN));
+		   adbhide_counter_get(CNT_NET_HIDDEN));
 
 	seq_printf(m, "redirect %s\n", adbhide_redirect_active() ? "active" : "off");
 	seq_printf(m, "netseq %s\n", adbhide_netseq_active() ? "active" : "off");
@@ -121,7 +120,6 @@ static int __init adbhide_init(void)
 	adbhide_props_init();
 	adbhide_netseq_init();
 	adbhide_vma_init();
-	adbhide_files_init();
 
 	if (!proc_create("adbhide_kmod", 0444, NULL, &adbhide_proc_ops))
 		pr_warn("adbhide_kmod: /proc entry not created\n");
@@ -133,7 +131,6 @@ static int __init adbhide_init(void)
 static void __exit adbhide_exit(void)
 {
 	remove_proc_entry("adbhide_kmod", NULL);
-	adbhide_files_exit();
 	adbhide_vma_exit();
 	adbhide_netseq_exit();
 	adbhide_props_exit();
