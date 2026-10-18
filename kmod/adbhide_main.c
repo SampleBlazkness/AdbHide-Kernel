@@ -83,7 +83,7 @@ static int adbhide_proc_show(struct seq_file *m, void *v)
 		   adbhide_probe_names[0], adbhide_probe_ok[0] ? "ok" : "failed",
 		   adbhide_probe_names[1], adbhide_probe_ok[1] ? "ok" : "failed");
 
-	seq_printf(m, "counters prop_open=%u tcp_read=%u tcp6_read=%u redirect=%u net_hidden=%u\n",
+	seq_printf(m, "counters prop_open=%u tcp_read=%u tcp6_read=%u redirect=%u net_hidden=%u sock_hidden=%u unix_hidden=%u mod_hidden=%u\n",
 		   adbhide_counter_get(CNT_PROP_OPEN),
 		   adbhide_counter_get(CNT_TCP_READ),
 		   adbhide_counter_get(CNT_TCP6_READ),
