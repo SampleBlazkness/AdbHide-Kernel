@@ -10,6 +10,12 @@ set_perm /data/adb/adbhide 0 0 0755
 if [ ! -f /data/adb/adbhide/blacklist.conf ]; then
     cat >/data/adb/adbhide/blacklist.conf <<'EOF'
 # One package name per line. Resolved to uids at boot and on "sync".
+com.eltavine.duckdetector
+com.byxiaorun.detector
+com.chunqiunativecheck
+com.zhenxi.hunter
+luna.safe.luna
+com.aistudio.rootchecker.kxzqmr
 EOF
 fi
 set_perm /data/adb/adbhide/blacklist.conf 0 0 0600

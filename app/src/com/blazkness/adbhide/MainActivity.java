@@ -44,6 +44,7 @@ public class MainActivity extends Activity {
             "echo NATIVE=$([ -f /data/adb/modules/adbhide_native/zygisk/arm64-v8a.so ] && echo 1 || echo 0)\n" +
             "echo NATIVEVER=$(sed -n 's/^version=//p' /data/adb/modules/adbhide_native/module.prop 2>/dev/null)\n" +
             "echo UIDS=$(tr '\\n' ' ' < /data/adb/adbhide/uids.txt 2>/dev/null)\n" +
+            "echo CONFCOUNT=$(grep -vc '^#' /data/adb/adbhide/blacklist.conf 2>/dev/null)\n" +
             "echo PORTS=$(iptables -S ADBHIDE_PORTS 2>/dev/null | grep -c uid-owner)\n" +
             "echo PORTS6=$(ip6tables -S ADBHIDE_PORTS 2>/dev/null | grep -c uid-owner)\n" +
             "echo MDNS=$(iptables -S ADBHIDE_MDNS_G 2>/dev/null | grep -c string)\n" +
@@ -241,6 +242,13 @@ public class MainActivity extends Activity {
         }
 
         sb.append('\n');
+        sb.append("\n");
+        sb.append("名单文件\n");
+        sb.append("  /data/adb/adbhide/blacklist.conf\n");
+        sb.append("  一行一个包名,改完点「同步名单」立即生效,\n");
+        sb.append("  不用重启;开机时也会自动同步一次。\n");
+        sb.append("  当前文件条目: ").append(nz(v.get("CONFCOUNT"))).append("\n");
+
         sb.append("子模块\n");
         sb.append("  ").append(kmodOk ? "✅" : "❌")
                 .append(" adbhide_kmod ").append(nz(v.get("KVER"))).append('\n');
