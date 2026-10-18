@@ -9,8 +9,8 @@ PLATFORM="$SDK/platforms/android-37.0/android.jar"
 ROOT="$(cd "$(dirname "$0")/.." && pwd -W)"
 APP="$ROOT/app"
 OUT="$ROOT/build/apk"
-VERSION_NAME="1.1.3"
-VERSION_CODE=23
+VERSION_NAME="1.1.4"
+VERSION_CODE=24
 
 rm -rf "$OUT"
 mkdir -p "$OUT/stubs-classes" "$OUT/classes" "$OUT/gen" "$OUT/dex" "$ROOT/dist"

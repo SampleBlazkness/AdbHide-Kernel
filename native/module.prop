@@ -1,6 +1,6 @@
 id=adbhide_native
 name=AdbHide Native
-version=v1.0.1
-versionCode=11
+version=v1.0.2
+versionCode=12
 author=Blazkness
-description=In-process property spoofing for blacklisted uids (Zygisk). Covers SystemProperties reflection and native libc reads that inherit the zygote property mapping.
+description=In-process property spoofing for blacklisted uids (Zygisk). Covers SystemProperties reflection and native libc reads that inherit the zygote property mapping. https://github.com/SampleBlazkness/AdbHide-Kernel
