@@ -18,7 +18,7 @@
 #include "adbhide.h"
 
 char adbhide_targets[512] = "";
-module_param_string(target_uids, adbhide_targets, sizeof(adbhide_targets), 0444);
+module_param_string(target_uids, adbhide_targets, sizeof(adbhide_targets), 0400);
 MODULE_PARM_DESC(target_uids, "Comma separated app uids to watch");
 
 static struct adbhide_event events[ADBHIDE_MAX_EVENTS];
