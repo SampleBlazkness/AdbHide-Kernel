@@ -1,6 +1,6 @@
 id=adbhide_kmod
 name=AdbHide (Kernel)
-version=v0.3.0
-versionCode=3
+version=v0.4.0
+versionCode=4
 author=Blazkness
-description=Kernel-level ADB hiding for selected apps. M3: serves a patched usb_control_prop (sys.usb.config/sys.usb.state = mtp) to target uids, including getprop child processes.
+description=Kernel-level ADB hiding for selected apps. M3: serves patched property areas (usb_control_prop, system_prop, init_service_status_prop, usb_config_prop) to target uids, so getprop children see mtp too.
