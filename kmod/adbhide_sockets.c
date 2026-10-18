@@ -361,6 +361,48 @@ static struct kretprobe dgram_connect_krp = {
 	.maxactive = 32,
 };
 
+/* SELinux denies connect() to /dev/socket/adbd inside security_socket_connect,
+ * before the unix layer is reached. Rewrite that EACCES to ENOENT here. */
+struct lsm_data {
+	bool hit;
+};
+
+static int lsm_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct lsm_data *d = (struct lsm_data *)ri->data;
+	struct sockaddr *addr = (struct sockaddr *)regs_get_kernel_argument(regs, 1);
+	int len = (int)regs_get_kernel_argument(regs, 2);
+
+	d->hit = false;
+	if (!adbhide_target_count())
+		return 0;
+	if (!adbhide_uid_is_target(adbhide_uid_now()))
+		return 0;
+	if (is_adbd_sock(addr, len))
+		d->hit = true;
+	return 0;
+}
+
+static int lsm_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct lsm_data *d = (struct lsm_data *)ri->data;
+
+	if (d->hit && (long)regs_return_value(regs) < 0) {
+		regs_set_return_value(regs, -ENOENT);
+		adbhide_counter_bump(CNT_SOCK_HIDDEN);
+		adbhide_event_add("sock", "adbd-lsm");
+	}
+	return 0;
+}
+
+static struct kretprobe lsm_connect_krp = {
+	.kp.symbol_name = "security_socket_connect",
+	.entry_handler = lsm_entry,
+	.handler = lsm_ret,
+	.data_size = sizeof(struct lsm_data),
+	.maxactive = 64,
+};
+
 /* ------------------------------------------------------------------ 生命周期 */
 
 static void adbd_resolve(struct work_struct *w)
@@ -440,6 +482,8 @@ void adbhide_sockets_exit(void)
 		unregister_kretprobe(&stream_connect_krp);
 	if (dgram_connect_krp.kp.addr)
 		unregister_kretprobe(&dgram_connect_krp);
+	if (lsm_connect_krp.kp.addr)
+		unregister_kretprobe(&lsm_connect_krp);
 	sock_active = false;
 }
 
