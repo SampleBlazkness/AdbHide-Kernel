@@ -14,15 +14,20 @@ import android.widget.TextView;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * Status panel. Every value comes from the device itself: the kernel module's
- * /proc node, the KernelSU module directory, the iptables chain and the uid
- * list. Reading them needs root, so the app has to be allowed in the KernelSU
- * manager - KernelSU denies su for apps that are not on its list, there is no
- * prompt to accept.
+ * /proc node, the module directories, the iptables chains and the uid list.
+ * Reading them needs root, so the app has to be on the KernelSU superuser
+ * list - KernelSU denies su for apps that are not listed, with no prompt.
+ *
+ * The panel states explicitly which protections are global and which apply
+ * only to the uid blacklist, because that split decides what an unlisted app
+ * (a new detector, for example) can still see.
  */
 public class MainActivity extends Activity {
 
@@ -31,20 +36,22 @@ public class MainActivity extends Activity {
             "echo KMOD=$([ -r $p ] && echo 1 || echo 0)\n" +
             "if [ -r $p ]; then\n" +
             "  echo KVER=$(head -n1 $p | cut -d' ' -f2)\n" +
-            "  echo KMODE=$(sed -n 's/^mode //p' $p)\n" +
-            "  echo KPROBES=$(sed -n 's/^probes //p' $p)\n" +
-            "  echo KCOUNTERS=$(sed -n 's/^counters //p' $p)\n" +
-            "  echo KTARGETS=$(sed -n 's/^targets [0-9]*://p' $p)\n" +
             "  echo KREDIR=$(sed -n 's/^redirect //p' $p)\n" +
             "  echo KNETSEQ=$(sed -n 's/^netseq //p' $p)\n" +
+            "  echo KCOUNTERS=$(sed -n 's/^counters //p' $p)\n" +
+            "  echo KTARGETS=$(sed -n 's/^targets [0-9]*://p' $p)\n" +
             "fi\n" +
-            "d=/data/adb/modules/adbhide_kmod\n" +
-            "echo MODULE=$([ -d $d ] && echo 1 || echo 0)\n" +
-            "echo MODDISABLED=$([ -e $d/disable ] && echo 1 || echo 0)\n" +
             "echo NATIVE=$([ -f /data/adb/modules/adbhide_native/zygisk/arm64-v8a.so ] && echo 1 || echo 0)\n" +
+            "echo NATIVEVER=$(sed -n 's/^version=//p' /data/adb/modules/adbhide_native/module.prop 2>/dev/null)\n" +
             "echo UIDS=$(tr '\\n' ' ' < /data/adb/adbhide/uids.txt 2>/dev/null)\n" +
             "echo PORTS=$(iptables -S ADBHIDE_PORTS 2>/dev/null | grep -c uid-owner)\n" +
-            "echo MDNS=$(iptables -S ADBHIDE_MDNS_G 2>/dev/null | grep -c string)\\n";
+            "echo PORTS6=$(ip6tables -S ADBHIDE_PORTS 2>/dev/null | grep -c uid-owner)\n" +
+            "echo MDNS=$(iptables -S ADBHIDE_MDNS_G 2>/dev/null | grep -c string)\n" +
+            "echo MDNS6=$(ip6tables -S ADBHIDE_MDNS_G 2>/dev/null | grep -c string)\n" +
+            "for u in $(cat /data/adb/adbhide/uids.txt 2>/dev/null); do\n" +
+            "  n=$(pm list packages --uid $u 2>/dev/null | sed 's/package://; s/ uid:.*//' | head -n1)\n" +
+            "  echo PKG_$u=$n\n" +
+            "done\n";
 
     private TextView status;
     private TextView hint;
@@ -65,7 +72,7 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("内核 + Native + LSPosed · 默认启用");
+        subtitle.setText("内核 + Native + LSPosed");
         subtitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         subtitle.setTextColor(Color.GRAY);
         root.addView(subtitle);
@@ -118,7 +125,7 @@ public class MainActivity extends Activity {
             while ((line = r.readLine()) != null) {
                 int eq = line.indexOf('=');
                 if (eq > 0) {
-                    v.put(line.substring(0, eq), line.substring(eq + 1));
+                    v.put(line.substring(0, eq), line.substring(eq + 1).trim());
                 }
             }
             r.close();
@@ -131,56 +138,79 @@ public class MainActivity extends Activity {
             }
         }
 
-        boolean haveRoot = "1".equals(v.get("KMOD")) || "1".equals(v.get("MODULE"));
+        boolean kmodOk = "1".equals(v.get("KMOD"));
+        boolean nativeOk = "1".equals(v.get("NATIVE"));
+        int uidCount = v.get("UIDS") == null || v.get("UIDS").isEmpty()
+                ? 0 : v.get("UIDS").trim().split("\\s+").length;
+        int ports = num(v.get("PORTS"));
+        int ports6 = num(v.get("PORTS6"));
+        int mdns = num(v.get("MDNS")) + num(v.get("MDNS6"));
+        boolean portsOk = ports >= uidCount * 2 && ports6 >= uidCount * 2;
+        boolean mdnsOk = mdns >= 2;
 
         StringBuilder sb = new StringBuilder();
-        sb.append("内核模块 (kmod)\n");
-        sb.append("  ").append(line(haveRoot, "1".equals(v.get("KMOD")),
-                "已加载 " + nz(v.get("KVER")), "未加载")).append('\n');
-        if (v.containsKey("KPROBES")) {
-            sb.append("  探针 ").append(nz(v.get("KPROBES"))).append('\n');
-        }
-        if (v.containsKey("KREDIR")) {
-            sb.append("  属性层 ").append(nz(v.get("KREDIR"))).append('\n');
-        }
-        if (v.containsKey("KNETSEQ")) {
-            sb.append("  网络层 ").append(nz(v.get("KNETSEQ"))).append('\n');
-        }
-        if (v.containsKey("KCOUNTERS")) {
-            sb.append("  计数 ").append(nz(v.get("KCOUNTERS"))).append('\n');
-        }
+
+        sb.append("全局保护\n");
+        sb.append("  ✅ Settings.Global 的 adb / 开发者 / 无线调试开关\n");
+        sb.append("     对全部普通应用返回 0\n");
+        sb.append("  ").append(mdnsOk ? "✅" : "❌")
+                .append(" mDNS 不再广播 _adb 记录\n");
+        sb.append("     整机生效,任何设备都发现不了这台手机\n");
 
         sb.append('\n');
-        sb.append("Native 层 (Zygisk)\n");
-        sb.append("  ").append(line(haveRoot, "1".equals(v.get("NATIVE")),
-                "已安装 · 目标进程属性映射已私有化", "未安装")).append('\n');
+        sb.append("按名单保护 (").append(uidCount).append(" 个 uid)\n");
+        sb.append("  ").append(kmodOk ? "✅" : "❌")
+                .append(" 属性伪装 ").append(nz(v.get("KREDIR"))).append('\n');
+        sb.append("     persist.sys.usb.config / sys.usb.* / init.svc.adbd\n");
+        sb.append("  ").append(kmodOk ? "✅" : "❌")
+                .append(" /proc/net/tcp{,6} 隐藏 adbd 监听行 ").append(nz(v.get("KNETSEQ"))).append('\n');
+        sb.append("  ").append(portsOk ? "✅" : "❌")
+                .append(" adbd 端口对名单 uid 拒绝连接 (").append(ports)
+                .append('/').append(ports6).append(" 条规则)\n");
+        sb.append("  ").append(nativeOk ? "✅" : "❌")
+                .append(" 名单进程内属性映射已私有化\n");
+        sb.append("     覆盖 Java / JNI / 反射三种读法\n");
 
         sb.append('\n');
-        sb.append("网络层规则\n");
-        sb.append("  ").append(haveRoot
-                ? "adbd 端口 REJECT " + nz(v.get("PORTS")) + " 条 · mDNS 丢弃 " + nz(v.get("MDNS")) + " 条"
-                : "无法读取(需要 root)").append('\n');
-
-        sb.append('\n');
-        sb.append("目标 uid\n");
+        sb.append("名单明细\n");
         String uids = nz(v.get("UIDS"));
-        sb.append("  ").append(uids.isEmpty() ? "(空)" : uids.trim()).append('\n');
-        String kt = nz(v.get("KTARGETS"));
-        if (!kt.isEmpty()) {
-            sb.append("  内核已接收:").append(kt.trim()).append('\n');
+        if (uids.isEmpty()) {
+            sb.append("  (空)\n");
+        } else {
+            for (String u : uids.split("\\s+")) {
+                if (u.isEmpty()) {
+                    continue;
+                }
+                String pkg = nz(v.get("PKG_" + u));
+                sb.append("  ").append(u);
+                if (!pkg.isEmpty()) {
+                    sb.append("  ").append(pkg);
+                }
+                sb.append('\n');
+            }
         }
 
         sb.append('\n');
-        sb.append("LSPosed 层\n");
-        sb.append("  ").append(MainHook.appHooked
-                ? "✅ 本进程已注入(SystemProperties 生效)"
-                : "— 本进程未注入(如需按应用伪造属性,把本应用加入作用域)").append('\n');
-        sb.append("  系统框架:作用域勾选「系统框架」后,\n");
-        sb.append("  所有应用读 adb_enabled / development_settings_enabled\n");
-        sb.append("  / adb_wifi_enabled 都会得到 0\n");
+        sb.append("子模块\n");
+        sb.append("  ").append(kmodOk ? "✅" : "❌")
+                .append(" adbhide_kmod ").append(nz(v.get("KVER"))).append('\n');
+        sb.append("     ").append(nz(v.get("KCOUNTERS"))).append('\n');
+        sb.append("  ").append(nativeOk ? "✅" : "❌")
+                .append(" adbhide_native ").append(nz(v.get("NATIVEVER"))).append('\n');
+        sb.append("  ").append(MainHook.appHooked ? "✅" : "—")
+                .append(" LSPosed 已注入本应用")
+                .append(MainHook.appHooked ? "\n" : "(不需要,Settings 层在系统框架里)\n");
 
-        if (!haveRoot) {
-            sb.append('\n');
+        sb.append('\n');
+        sb.append("不在保护范围\n");
+        sb.append("  · root 本身:KernelSU、管理器、模块目录\n");
+        sb.append("  · USB 设置界面里的开关(系统进程读真值)\n");
+        sb.append("  · 名单外的应用可以看到全部真实状态\n");
+        sb.append("  · 属性值是进程启动时的快照,之后不再跟随系统变化\n");
+        sb.append("  · 自动发现失效:adb mdns / IDE 列表 / 扫码配对\n");
+        sb.append("    手动 adb connect IP:5555、adb pair IP:端口 配对码 照常\n");
+
+        if (!kmodOk && v.isEmpty()) {
             hint.setText("读不到模块状态:请在 KernelSU 管理器的「超级用户」里把 AdbHide 加入白名单"
                     + (error == null ? "" : "(" + error + ")"));
         } else {
@@ -189,11 +219,12 @@ public class MainActivity extends Activity {
         return sb.toString();
     }
 
-    private static String line(boolean known, boolean ok, String yes, String no) {
-        if (!known) {
-            return "— " + no;
+    private static int num(String s) {
+        try {
+            return s == null ? 0 : Integer.parseInt(s.trim());
+        } catch (Throwable t) {
+            return 0;
         }
-        return (ok ? "✅ " : "❌ ") + (ok ? yes : no);
     }
 
     private static String nz(String s) {
