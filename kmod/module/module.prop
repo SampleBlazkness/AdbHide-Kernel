@@ -1,6 +1,6 @@
 id=adbhide_kmod
 name=AdbHide (Kernel)
-version=v0.4.0
-versionCode=4
+version=v0.5.0
+versionCode=5
 author=Blazkness
-description=Kernel-level ADB hiding for selected apps. M3: serves patched property areas (usb_control_prop, system_prop, init_service_status_prop, usb_config_prop) to target uids, so getprop children see mtp too.
+description=Kernel-level ADB hiding for selected apps. M4: patched property areas for target uids, adbd listener rows removed from /proc/net/tcp{,6}, and the private property remap restored to a shared-looking VMA.

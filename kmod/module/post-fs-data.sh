@@ -27,6 +27,10 @@ mk_req() {
 }
 
 REQ="redirect=1 $(mk_req)"
+# adbd listens on 5555 unless the tcp port was overridden
+_p=$(getprop service.adb.tcp.port 2>/dev/null)
+case "$_p" in ''|*[!0-9]*) _p=5555;; esac
+REQ="$REQ adb_port=$_p"
 echo "$(date) loading ko with: $REQ" >>"$LOG"
 
 if [ -x /data/adb/ksud ]; then

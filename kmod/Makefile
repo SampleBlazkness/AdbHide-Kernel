@@ -6,6 +6,7 @@
 
 obj-m += adbhide_kmod.o
 adbhide_kmod-y := adbhide_main.o adbhide_uids.o adbhide_probes.o adbhide_props.o
+adbhide_kmod-y += adbhide_netseq.o adbhide_vma.o
 
 ifeq ($(KERNELRELEASE),)
 
