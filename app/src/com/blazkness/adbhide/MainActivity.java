@@ -222,9 +222,14 @@ public class MainActivity extends Activity {
 
         sb.append("\n");
         sb.append("子模块\n");
-        sb.append("  ").append(kmodOk ? "✅ 内核 " + nz(v.get("KVER")) : "❌ 内核模块未启用").append("\n");
+        sb.append("  ").append(kmodOk ? "✅ 内核 v" + nz(v.get("KVER")) : "❌ 内核模块未启用").append("\n");
         sb.append("  ").append(nativeOk ? "✅ Native " + nz(v.get("NATIVEVER")) : "❌ Native 模块未启用").append("\n");
-        sb.append("  ✅ 应用(本应用)\n");
+        String selfVer = "";
+        try {
+            selfVer = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Throwable ignored) {
+        }
+        sb.append("  ✅ 应用 v").append(nz(selfVer)).append("\n");
         if (!kmodOk || !nativeOk) {
             sb.append("  未启用的请到 github.com/SampleBlazkness/AdbHide-Kernel/releases 下载\n");
         }
