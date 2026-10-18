@@ -6,7 +6,7 @@
 #include <linux/cred.h>
 #include <linux/sched.h>
 
-#define ADBHIDE_KVER      "0.4.0"
+#define ADBHIDE_KVER      "0.5.0"
 #define ADBHIDE_MAX_UIDS  64
 #define ADBHIDE_MAX_EVENTS 64
 
@@ -31,6 +31,7 @@ enum adbhide_counter {
 	CNT_TCP_READ,
 	CNT_TCP6_READ,
 	CNT_REDIRECT,
+	CNT_NET_HIDDEN,
 	CNT_MAX,
 };
 
@@ -47,6 +48,15 @@ extern const char *const adbhide_probe_names[2];
 
 int adbhide_probes_register(void);
 void adbhide_probes_unregister(void);
+
+/* adbhide_netseq.c (M4) */
+int adbhide_netseq_init(void);
+void adbhide_netseq_exit(void);
+int adbhide_netseq_active(void);
+
+/* adbhide_vma.c (M4) */
+int adbhide_vma_init(void);
+void adbhide_vma_exit(void);
 
 /* adbhide_props.c (M3) */
 int adbhide_props_init(void);
