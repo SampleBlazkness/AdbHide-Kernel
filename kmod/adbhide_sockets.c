@@ -363,6 +363,15 @@ static int lsm_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	int len = (int)regs_get_kernel_argument(regs, 2);
 
 	d->hit = false;
+	if (adbhide_uid_is_target(adbhide_uid_now())) {
+		static int seen;
+		if (seen < 5) {
+			seen++;
+			pr_info("adbhide dbg: lsm uid=%u len=%d fam=%d
+",
+				adbhide_uid_now(), len, addr ? addr->sa_family : -1);
+		}
+	}
 	if (!adbhide_target_count())
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
