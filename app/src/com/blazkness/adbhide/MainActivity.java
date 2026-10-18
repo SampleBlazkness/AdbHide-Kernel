@@ -119,6 +119,7 @@ public class MainActivity extends Activity {
         root.addView(hint);
 
         setContentView(root);
+        ensureConfig();
         refresh();
     }
 
@@ -141,6 +142,35 @@ public class MainActivity extends Activity {
                 });
             }
         }).start();
+    }
+
+    private static final String[] DEFAULT_PKGS = {
+            "com.eltavine.duckdetector",
+            "com.byxiaorun.detector",
+            "com.chunqiunativecheck",
+            "com.zhenxi.hunter",
+            "luna.safe.luna",
+            "com.aistudio.rootchecker.kxzqmr",
+    };
+
+    /** The app owns the list: create it with the defaults on first launch. */
+    private void ensureConfig() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("f=/data/adb/adbhide/blacklist.conf\n");
+        sb.append("if [ ! -f $f ]; then\n");
+        sb.append("  mkdir -p /data/adb/adbhide\n");
+        sb.append("  printf '%s\n'");
+        for (String p : DEFAULT_PKGS) {
+            sb.append(" ").append(p);
+        }
+        sb.append(" > $f\n");
+        sb.append("  chmod 600 $f\n");
+        sb.append("fi\n");
+        sb.append("sh /data/adb/modules/adbhide_kmod/sync.sh\n");
+        try {
+            Runtime.getRuntime().exec(new String[]{"su", "-c", sb.toString()}).waitFor();
+        } catch (Throwable ignored) {
+        }
     }
 
     private void refresh() {
