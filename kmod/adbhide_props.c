@@ -32,6 +32,7 @@
 #include <linux/string.h>
 #include <linux/mutex.h>
 #include <linux/jiffies.h>
+#include <linux/workqueue.h>
 #include <linux/version.h>
 #include "adbhide.h"
 
@@ -224,24 +225,31 @@ static struct ab_blob *load_prop_blob(const char *ctx)
 	return b;
 }
 
-/* returns a referenced snapshot, refreshed at most every BLOB_TTL */
+static void blob_work_fn(struct work_struct *w)
+{
+	struct ab_blob *nb = load_prop_blob(PROP_CTX_FILE);
+
+	if (!IS_ERR(nb)) {
+		struct ab_blob *old;
+
+		mutex_lock(&blob_lock);
+		old = g_blob;
+		g_blob = nb;
+		mutex_unlock(&blob_lock);
+		if (old)
+			kref_put(&old->ref, blob_release);
+	}
+	schedule_delayed_work(to_delayed_work(w), BLOB_TTL);
+}
+
+static DECLARE_DELAYED_WORK(blob_work, blob_work_fn);
+
+/* returns a referenced snapshot, refreshed by blob_work */
 static struct ab_blob *blob_get(void)
 {
 	struct ab_blob *b = NULL;
 
 	mutex_lock(&blob_lock);
-	if (!g_blob || time_after(jiffies, g_blob_ts + BLOB_TTL)) {
-		struct ab_blob *nb = load_prop_blob(PROP_CTX_FILE);
-
-		if (!IS_ERR(nb)) {
-			struct ab_blob *old = g_blob;
-
-			g_blob = nb;
-			g_blob_ts = jiffies;
-			if (old)
-				kref_put(&old->ref, blob_release);
-		}
-	}
 	if (g_blob) {
 		kref_get(&g_blob->ref);
 		b = g_blob;
@@ -468,9 +476,16 @@ void adbhide_props_exit(void)
 		unregister_kretprobe(&ab_krp);
 		g_redirect_state = 0;
 	}
+	cancel_delayed_work_sync(&blob_work);
 	if (g_blob) {
-		kref_put(&g_blob->ref, blob_release);
+		struct ab_blob *old;
+
+		mutex_lock(&blob_lock);
+		old = g_blob;
 		g_blob = NULL;
+		mutex_unlock(&blob_lock);
+		if (old)
+			kref_put(&old->ref, blob_release);
 	}
 }
 
