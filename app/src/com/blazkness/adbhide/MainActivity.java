@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
+import android.os.Environment;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -13,6 +14,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -140,15 +143,51 @@ public class MainActivity extends Activity {
 
         boolean kmodOk = "1".equals(v.get("KMOD"));
         boolean nativeOk = "1".equals(v.get("NATIVE"));
-        int uidCount = v.get("UIDS") == null || v.get("UIDS").isEmpty()
-                ? 0 : v.get("UIDS").trim().split("\\s+").length;
+        String uidsRaw = nz(v.get("UIDS")).trim();
+        int uidCount = uidsRaw.isEmpty() ? 0 : uidsRaw.split("\\s+").length;
         int ports = num(v.get("PORTS"));
         int ports6 = num(v.get("PORTS6"));
         int mdns = num(v.get("MDNS")) + num(v.get("MDNS6"));
         boolean portsOk = ports >= uidCount * 2 && ports6 >= uidCount * 2;
         boolean mdnsOk = mdns >= 2;
+        boolean readable = kmodOk || nativeOk || !uidsRaw.isEmpty()
+                || ports + ports6 > 0;
+        boolean snapshot = false;
+        String stamp = "";
+
+        if (!readable) {
+            Map<String, String> snap = readSnapshot();
+            if (snap != null) {
+                v = snap;
+                snapshot = true;
+                stamp = nz(v.get("STAMP"));
+                kmodOk = "1".equals(v.get("KMOD"));
+                nativeOk = "1".equals(v.get("NATIVE"));
+                uidsRaw = nz(v.get("UIDS")).trim();
+                uidCount = uidsRaw.isEmpty() ? 0 : uidsRaw.split("\\s+").length;
+                ports = num(v.get("PORTS"));
+                ports6 = num(v.get("PORTS6"));
+                mdns = num(v.get("MDNS")) + num(v.get("MDNS6"));
+                portsOk = ports >= uidCount * 2 && ports6 >= uidCount * 2;
+                mdnsOk = mdns >= 2;
+                readable = true;
+            }
+        }
 
         StringBuilder sb = new StringBuilder();
+        if (snapshot) {
+            sb.append("数据来自开机快照: ").append(stamp).append("\n");
+            sb.append("KernelSU 未允许本应用执行 su,实时状态读不到;\n");
+            sb.append("下方内容为最近一次开机时模块写入的状态。\n\n");
+        }
+        if (!readable) {
+            sb.append("无法读取状态\n\n");
+            sb.append("  当前进程没有 root,且没有可用的状态快照:\n");
+            sb.append("  ").append(error == null ? "su 不可用" : error).append("\n\n");
+            sb.append("  在 KernelSU 管理器里授予本应用 root 后再刷新。\n");
+            hint.setText("读不到模块状态");
+            return sb.toString();
+        }
 
         sb.append("全局保护\n");
         sb.append("  ✅ Settings.Global 的 adb / 开发者 / 无线调试开关\n");
@@ -182,6 +221,16 @@ public class MainActivity extends Activity {
                     continue;
                 }
                 String pkg = nz(v.get("PKG_" + u));
+                if (pkg.isEmpty()) {
+                    try {
+                        String[] ps = getPackageManager()
+                                .getPackagesForUid(Integer.parseInt(u));
+                        if (ps != null && ps.length > 0) {
+                            pkg = ps[0];
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
                 sb.append("  ").append(u);
                 if (!pkg.isEmpty()) {
                     sb.append("  ").append(pkg);
@@ -217,6 +266,29 @@ public class MainActivity extends Activity {
             hint.setText("");
         }
         return sb.toString();
+    }
+
+    private Map<String, String> readSnapshot() {
+        Map<String, String> out = new HashMap<>();
+        try {
+            File f = new File(Environment.getExternalStorageDirectory(),
+                    "Android/data/com.blazkness.adbhide/files/status.txt");
+            if (!f.exists()) {
+                return null;
+            }
+            BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(f)));
+            String line;
+            while ((line = r.readLine()) != null) {
+                int eq = line.indexOf('=');
+                if (eq > 0) {
+                    out.put(line.substring(0, eq), line.substring(eq + 1).trim());
+                }
+            }
+            r.close();
+        } catch (Throwable t) {
+            return null;
+        }
+        return out.isEmpty() ? null : out;
     }
 
     private static int num(String s) {
