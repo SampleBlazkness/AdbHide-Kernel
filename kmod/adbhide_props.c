@@ -211,8 +211,7 @@ static struct ab_blob *load_prop_blob(const char *ctx)
 	n = read_prop_file(f, b->data, cap);
 	filp_close(f, NULL);
 	if (n <= 0) {
-		pr_warn_ratelimited("adbhide_kmod: snapshot read returned %zd
-", n);
+		pr_warn_ratelimited("adbhide_kmod: snapshot read returned %zd\n", n);
 		kfree(b);
 		return ERR_PTR(n ? (long)n : -EIO);
 	}
