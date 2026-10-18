@@ -106,7 +106,7 @@ static int vfs_statx_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
 		return 0;
-	if (!fn || !fn->name)
+	if (!fn || IS_ERR(fn) || !fn->name)
 		return 0;
 	if (strcmp(fn->name, "/dev/socket/adbd"))
 		return 0;
