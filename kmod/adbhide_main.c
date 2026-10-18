@@ -17,6 +17,9 @@
 #include <linux/uaccess.h>
 #include "adbhide.h"
 
+/* filp_open() and kern_path() live in the VFS namespace on GKI kernels. */
+MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
+
 char adbhide_targets[512] = "";
 module_param_string(target_uids, adbhide_targets, sizeof(adbhide_targets), 0400);
 MODULE_PARM_DESC(target_uids, "Comma separated app uids to watch");
