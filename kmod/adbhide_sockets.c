@@ -324,7 +324,9 @@ static int connect_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 	struct conn_data *d = (struct conn_data *)ri->data;
 
-	if (d->hit && (long)regs_return_value(regs) < 0) {
+	long ret = (long)regs_return_value(regs);
+
+	if (d->hit && (ret == 0 || (d->adbd && ret < 0))) {
 		regs_set_return_value(regs, d->adbd ? -ENOENT : -ECONNREFUSED);
 		adbhide_counter_bump(CNT_UNIX_HIDDEN);
 		adbhide_event_add("unix", d->adbd ? "adbd-connect" : "jdwp-connect");
