@@ -151,15 +151,6 @@ static int inode_permission_entry(struct kretprobe_instance *ri,
 		return 0;
 	if (!adbhide_target_count() || !adbhide_uid_is_target(adbhide_uid_now()))
 		return 0;
-	if (S_ISSOCK(inode->i_mode)) {
-		static int ino_dbg;
-		if (ino_dbg < 3) {
-			ino_dbg++;
-			pr_info("adbhide dbg: ino=%lu adbd_ino=%lu match=%d\n",
-				inode->i_ino, adbd_ino,
-				inode->i_ino == adbd_ino);
-		}
-	}
 	if (!S_ISSOCK(inode->i_mode) || inode->i_ino != adbd_ino)
 		return 0;
 	if (adbd_sb && inode->i_sb != adbd_sb)
@@ -372,26 +363,10 @@ static int lsm_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	int len = (int)regs_get_kernel_argument(regs, 2);
 
 	d->hit = false;
-	if (adbhide_uid_is_target(adbhide_uid_now())) {
-		static int seen;
-		if (seen < 5) {
-			seen++;
-			pr_info("adbhide dbg: lsm uid=%u len=%d fam=%d\n",
-				adbhide_uid_now(), len, addr ? addr->sa_family : -1);
-		}
-	}
-	if (!adbhide_target_count())
-		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
 		return 0;
-	if (is_adbd_sock(addr, len)) {
-		static int hit_dbg;
+	if (is_adbd_sock(addr, len))
 		d->hit = true;
-		if (hit_dbg < 3) {
-			hit_dbg++;
-			pr_info("adbhide dbg: lsm HIT\n");
-		}
-	}
 	return 0;
 }
 
@@ -399,7 +374,7 @@ static int lsm_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 	struct lsm_data *d = (struct lsm_data *)ri->data;
 
-	if (d->hit && (long)regs_return_value(regs) < 0) {
+	if (d->hit) {
 		regs_set_return_value(regs, -ENOENT);
 		adbhide_counter_bump(CNT_SOCK_HIDDEN);
 		adbhide_event_add("sock", "adbd-lsm");
