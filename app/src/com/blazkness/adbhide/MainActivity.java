@@ -12,6 +12,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.text.util.Linkify;
+import java.util.regex.Pattern;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -144,7 +145,7 @@ public class MainActivity extends Activity {
 
     private void refresh() {
         status.setText(readState());
-        Linkify.addLinks(status, Linkify.WEB_URLS);
+        Linkify.addLinks(status, Pattern.compile("github\\.com/\\S+"), "https://");
     }
 
     private String readState() {
@@ -184,95 +185,52 @@ public class MainActivity extends Activity {
         boolean readable = kmodOk || nativeOk || !uidsRaw.isEmpty()
                 || ports + ports6 > 0;
         StringBuilder sb = new StringBuilder();
-        if (!readable) {
-            sb.append("无法读取状态\n\n");
-            sb.append("  当前进程没有 root:\n");
-            sb.append("  ").append(error == null ? "su 不可用" : error).append("\n\n");
-            sb.append("  在 KernelSU 管理器里授予本应用 root 后再刷新。\n");
-            hint.setText("读不到模块状态");
-            return sb.toString();
-        }
 
-        sb.append("全局保护\n");
-        sb.append("  ✅ Settings.Global 的 adb / 开发者 / 无线调试开关\n");
-        sb.append("     对全部普通应用返回 0\n");
-        sb.append("  ").append(mdnsOk ? "✅" : "❌")
-                .append(" mDNS 不再广播 _adb 记录\n");
-        sb.append("     整机生效,任何设备都发现不了这台手机\n");
+        sb.append("全局隐藏(系统属性)\n");
+        sb.append("  ").append(mdnsOk ? "✅" : "❌").append(" 系统设置开关(adb/开发者/无线调试)\n");
 
-        sb.append('\n');
-        sb.append("按名单保护 (").append(uidCount).append(" 个 uid)\n");
-        sb.append("  ").append(kmodOk ? "✅" : "❌")
-                .append(" 属性伪装 ").append(nz(v.get("KREDIR"))).append('\n');
-        sb.append("     persist.sys.usb.config / sys.usb.* / init.svc.adbd\n");
-        sb.append("  ").append(kmodOk ? "✅" : "❌")
-                .append(" /proc/net/tcp{,6} 隐藏 adbd 监听行 ").append(nz(v.get("KNETSEQ"))).append('\n');
-        sb.append("  ").append(portsOk ? "✅" : "❌")
-                .append(" adbd 端口对名单 uid 拒绝连接 (").append(ports)
-                .append('/').append(ports6).append(" 条规则)\n");
-        sb.append("  ").append(nativeOk ? "✅" : "❌")
-                .append(" 名单进程内属性映射已私有化\n");
-        sb.append("     覆盖 Java / JNI / 反射三种读法\n");
+        sb.append("\n");
+        sb.append("应用隐藏(名单内 ").append(uidCount).append(" 个应用)\n");
+        sb.append("  ").append(kmodOk ? "✅" : "❌").append(" 属性读取伪装\n");
+        sb.append("  ").append(kmodOk ? "✅" : "❌").append(" 网络连接表\n");
+        sb.append("  ").append(portsOk ? "✅" : "❌").append(" adbd 端口\n");
+        sb.append("  ").append(nativeOk ? "✅" : "❌").append(" 进程内属性\n");
 
-        sb.append('\n');
+        sb.append("\n");
+        sb.append("名单\n");
+        sb.append("  /data/adb/adbhide/blacklist.conf\n");
+        sb.append("  一行一个包名,改完点「同步名单」,不用重启\n");
+        sb.append("  条目: ").append(nz(v.get("CONFCOUNT"))).append("\n");
+
+        sb.append("\n");
         sb.append("名单明细\n");
-        String uids = nz(v.get("UIDS"));
-        if (uids.isEmpty()) {
+        if (uidsRaw.isEmpty()) {
             sb.append("  (空)\n");
         } else {
-            for (String u : uids.split("\\s+")) {
-                if (u.isEmpty()) {
-                    continue;
-                }
+            for (String u : uidsRaw.split("\\s+")) {
                 String pkg = nz(v.get("PKG_" + u));
                 if (pkg.isEmpty()) {
                     try {
-                        String[] ps = getPackageManager()
-                                .getPackagesForUid(Integer.parseInt(u));
-                        if (ps != null && ps.length > 0) {
-                            pkg = ps[0];
-                        }
+                        String[] ps = getPackageManager().getPackagesForUid(Integer.parseInt(u));
+                        if (ps != null && ps.length > 0) pkg = ps[0];
                     } catch (Throwable ignored) {
                     }
                 }
-                sb.append("  ").append(u);
-                if (!pkg.isEmpty()) {
-                    sb.append("  ").append(pkg);
-                }
-                sb.append('\n');
+                sb.append("  ").append(u).append("  ").append(pkg).append("\n");
             }
         }
 
-        sb.append('\n');
         sb.append("\n");
-        sb.append("名单文件\n");
-        sb.append("  /data/adb/adbhide/blacklist.conf\n");
-        sb.append("  一行一个包名,改完点「同步名单」立即生效,\n");
-        sb.append("  不用重启;开机时也会自动同步一次。\n");
-        sb.append("  当前文件条目: ").append(nz(v.get("CONFCOUNT"))).append("\n");
-
         sb.append("子模块\n");
-        sb.append("  ").append(kmodOk ? "✅" : "❌")
-                .append(" adbhide_kmod ").append(nz(v.get("KVER"))).append('\n');
-        sb.append("     ").append(nz(v.get("KCOUNTERS"))).append('\n');
-        sb.append("  ").append(nativeOk ? "✅" : "❌")
-                .append(" adbhide_native ").append(nz(v.get("NATIVEVER"))).append('\n');
-        sb.append("  ✅ 系统设置层(Settings.Global)\n");
-        sb.append("     由 LSPosed 作用域「系统框架」提供,\n");
-        sb.append("     本应用不需要被注入。\n");
+        sb.append("  ").append(kmodOk ? "✅ 内核 " + nz(v.get("KVER")) : "❌ 内核模块未启用").append("\n");
+        sb.append("  ").append(nativeOk ? "✅ Native " + nz(v.get("NATIVEVER")) : "❌ Native 模块未启用").append("\n");
+        sb.append("  ✅ 应用(本应用)\n");
+        if (!kmodOk || !nativeOk) {
+            sb.append("  未启用的请到 github.com/SampleBlazkness/AdbHide-Kernel/releases 下载\n");
+        }
 
-        sb.append('\n');
+        sb.append("\n");
         sb.append("作者 Blazkness\n");
-        sb.append("github.com/SampleBlazkness/AdbHide-Kernel\n");
-
-        sb.append('\n');
-        sb.append("不在保护范围\n");
-        sb.append("  · root 本身:KernelSU、管理器、模块目录\n");
-        sb.append("  · USB 设置界面里的开关(系统进程读真值)\n");
-        sb.append("  · 名单外的应用可以看到全部真实状态\n");
-        sb.append("  · 属性值是进程启动时的快照,之后不再跟随系统变化\n");
-        sb.append("  · 自动发现失效:adb mdns / IDE 列表 / 扫码配对\n");
-        sb.append("    手动 adb connect IP:5555、adb pair IP:端口 配对码 照常\n");
 
         if (!kmodOk && v.isEmpty()) {
             hint.setText("读不到模块状态:请在 KernelSU 管理器的「超级用户」里把 AdbHide 加入白名单"
