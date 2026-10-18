@@ -2,6 +2,7 @@ package com.blazkness.adbhide;
 
 import android.os.Binder;
 import android.os.Bundle;
+import android.os.Process;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -26,6 +27,7 @@ public class MainHook implements IXposedHookLoadPackage {
 
     private static final String TAG = "AdbHide";
     private static final String SYSTEM_PKG = "android";
+    private static final String SETTINGS_PKG = "com.android.providers.settings";
     private static final String SPOOF_VALUE = "0";
 
     /** set when this process got the SystemProperties layer */
@@ -59,11 +61,16 @@ public class MainHook implements IXposedHookLoadPackage {
             return;
         }
         try {
-            if (SYSTEM_PKG.equals(lp.packageName)) {
-                hookSettingsProvider(lp);
-            } else {
-                hookSystemProperties(lp);
+            // System processes (uid < 10000) must never get the property layer:
+            // it is meant for apps, and spoofing props inside telecom/settings
+            // would change system behaviour. Only the settings provider matters.
+            if (Process.myUid() < 10000) {
+                if (SYSTEM_PKG.equals(lp.packageName) || SETTINGS_PKG.equals(lp.packageName)) {
+                    hookSettingsProvider(lp);
+                }
+                return;
             }
+            hookSystemProperties(lp);
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": load " + lp.packageName + " failed: " + t);
         }
