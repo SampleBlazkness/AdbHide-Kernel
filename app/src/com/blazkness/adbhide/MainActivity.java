@@ -227,6 +227,11 @@ public class MainActivity extends Activity {
         sb.append("  ").append(nativeOk ? "✅" : "❌").append(" 进程内属性\n");
 
         sb.append("\n");
+        sb.append("无线调试\n");
+        sb.append("  自动发现已关闭(隐藏需要)\n");
+        sb.append("  配对: adb pair IP:端口 配对码\n");
+        sb.append("  连接: adb connect IP:端口\n");
+        sb.append("\n");
         sb.append("名单\n");
         sb.append("  /data/adb/adbhide/blacklist.conf\n");
         sb.append("  一行一个包名,改完点「同步名单」,不用重启\n");
