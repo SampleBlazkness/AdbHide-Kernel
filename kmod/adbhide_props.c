@@ -1,21 +1,22 @@
 // SPDX-License-Identifier: MIT
 //
-// M3: property-area redirect.
+// M3: property-area redirect, all adb-relevant contexts.
 //
 // Target apps read the property area through `getprop` child processes, which
-// mmap /dev/__properties__/<context>. Changing the in-process view is useless
-// there, so the redirect happens at the file layer:
+// mmap /dev/__properties__/<context>. The redirect therefore happens at the
+// file layer: a kretprobe on vfs_open swaps file->f_op for target uids, and
+// every later read()/mmap() serves a patched copy from kernel memory. The real
+// file is untouched; the process's maps still show the same path.
 //
-//   kretprobe vfs_open -> if a target uid just opened a property file, swap
-//   file->f_op for ours; every later read()/mmap() then serves a patched copy
-//   held in kernel memory. The real file is untouched and the process's maps
-//   still show the same path, so nothing looks synthetic.
+// Snapshots are taken and refreshed by a delayed work; a kretprobe handler must
+// never do I/O (preemption is disabled there).
 //
-// The copy is taken lazily, on first use, and refreshed every few seconds: at
-// post-fs-data time the property service has not yet written values such as
-// sys.usb.config, so a boot-time snapshot would be missing them.
-//
-// Only usb_control_prop (sys.usb.config / sys.usb.state) is patched for now.
+// Contexts covered (file names are SELinux contexts, not short names):
+//   usb_control_prop          sys.usb.config / sys.usb.state
+//   system_prop               persist.sys.usb.config, ro.debuggable, ro.secure,
+//                             ro.adb.secure, service.adb.root
+//   init_service_status_prop  init.svc.adbd
+//   usb_config_prop           sys.usb.config (vendor duplicate)
 
 #include <linux/module.h>
 #include <linux/fs.h>
@@ -36,13 +37,53 @@
 #include <linux/version.h>
 #include "adbhide.h"
 
-#define PROP_CTX_FILE "u:object_r:usb_control_prop:s0"
-#define PROP_DIR      "__properties__"
-#define BLOB_TTL      (5 * HZ)
+#define PROP_DIR "__properties__"
+#define BLOB_TTL (5 * HZ)
 
 static int redirect;
 module_param(redirect, int, 0444);
 MODULE_PARM_DESC(redirect, "1 = serve patched property files to target uids");
+
+struct ab_key {
+	const char *name;
+	const char *value;
+};
+
+struct ab_spec {
+	const char *file;
+	const struct ab_key *keys;
+	unsigned int nkeys;
+};
+
+static const struct ab_key keys_usb[] = {
+	{ "sys.usb.config", "mtp" },
+	{ "sys.usb.state", "mtp" },
+};
+
+static const struct ab_key keys_sys[] = {
+	{ "persist.sys.usb.config", "mtp" },
+	{ "ro.debuggable", "0" },
+	{ "ro.secure", "1" },
+	{ "ro.adb.secure", "1" },
+	{ "service.adb.root", "0" },
+};
+
+static const struct ab_key keys_init[] = {
+	{ "init.svc.adbd", "stopped" },
+};
+
+static const struct ab_key keys_usbcfg[] = {
+	{ "sys.usb.config", "mtp" },
+};
+
+static const struct ab_spec g_specs[] = {
+	{ "u:object_r:usb_control_prop:s0", keys_usb, ARRAY_SIZE(keys_usb) },
+	{ "u:object_r:system_prop:s0", keys_sys, ARRAY_SIZE(keys_sys) },
+	{ "u:object_r:init_service_status_prop:s0", keys_init, ARRAY_SIZE(keys_init) },
+	{ "u:object_r:usb_config_prop:s0", keys_usbcfg, ARRAY_SIZE(keys_usbcfg) },
+};
+
+#define AB_NCTX ARRAY_SIZE(g_specs)
 
 struct ab_blob {
 	struct kref ref;
@@ -50,16 +91,16 @@ struct ab_blob {
 	u8 data[];
 };
 
-static struct ab_blob *g_blob;
+static struct ab_blob *g_blob[AB_NCTX];
 static DEFINE_MUTEX(blob_lock);
-static int g_redirect_state;   /* 1 = hook armed */
+static int g_redirect_state;
 
 /* ---------- property area parsing (bionic layout) ---------- */
 
-#define PROP_AREA_HDR   128
-#define PROP_TRIE_NAME  20
-#define PROP_INFO_VAL   4
-#define PROP_VALUE_MAX  92
+#define PROP_AREA_HDR  128
+#define PROP_TRIE_NAME 20
+#define PROP_INFO_VAL  4
+#define PROP_VALUE_MAX 92
 
 static inline u32 rd32(const void *p)
 {
@@ -75,10 +116,7 @@ static int cmp_prop_name(const char *one, u32 one_len, const char *two, u32 two_
 	return strncmp(one, two, one_len);
 }
 
-/*
- * The root node is a dummy: the first name token lives in root->children, and
- * every further token in the previous node's children.
- */
+/* root is a dummy node: the first token lives in root->children */
 static const u8 *find_prop_info(const u8 *data, const char *name)
 {
 	const char *remaining = name;
@@ -92,7 +130,7 @@ static const u8 *find_prop_info(const u8 *data, const char *name)
 
 		if (!tok_len)
 			return NULL;
-		off = rd32(cur + 16);           /* children */
+		off = rd32(cur + 16);
 		if (!off)
 			return NULL;
 
@@ -113,7 +151,7 @@ static const u8 *find_prop_info(const u8 *data, const char *name)
 			return NULL;
 
 		if (!sep) {
-			off = rd32(hit + 4);    /* prop */
+			off = rd32(hit + 4);
 			return off ? data + off : NULL;
 		}
 		cur = hit;
@@ -127,7 +165,7 @@ static bool patch_value(u8 *area, size_t len, const char *name, const char *valu
 
 	if (len < PROP_AREA_HDR + 8)
 		return false;
-	if (rd32(area + 8) != 0x504f5250)     /* PROP_AREA_MAGIC */
+	if (rd32(area + 8) != 0x504f5250)
 		return false;
 
 	info = (u8 *)find_prop_info(area + PROP_AREA_HDR, name);
@@ -150,10 +188,6 @@ static void blob_release(struct kref *ref)
 	kfree(b);
 }
 
-/*
- * kernel_read() is not usable on property files (the vendor KernelSU hook
- * rejects it), so pull the pages straight out of the page cache instead.
- */
 static ssize_t read_prop_file(struct file *f, u8 *dst, size_t cap)
 {
 	struct address_space *mapping = f->f_mapping;
@@ -168,7 +202,6 @@ static ssize_t read_prop_file(struct file *f, u8 *dst, size_t cap)
 		size_t n = min_t(size_t, PAGE_SIZE, cap - done);
 
 		if (!pg) {
-			/* not populated: the area beyond bytes_used is unused */
 			memset(dst + done, 0, n);
 		} else {
 			void *k = kmap_local_page(pg);
@@ -183,22 +216,19 @@ static ssize_t read_prop_file(struct file *f, u8 *dst, size_t cap)
 	return done;
 }
 
-static struct ab_blob *load_prop_blob(const char *ctx)
+static struct ab_blob *load_prop_blob(const struct ab_spec *spec)
 {
 	char path[96];
 	struct file *f;
 	struct ab_blob *b;
 	ssize_t n;
 	size_t cap = 128 * 1024;
-	bool p1;
+	unsigned int i, hit = 0;
 
-	snprintf(path, sizeof(path), "/dev/%s/%s", PROP_DIR, ctx);
+	snprintf(path, sizeof(path), "/dev/%s/%s", PROP_DIR, spec->file);
 	f = filp_open(path, O_RDONLY | O_CLOEXEC, 0);
-	if (IS_ERR(f)) {
-		pr_warn_ratelimited("adbhide_kmod: cannot open %s: %ld\n",
-				    path, PTR_ERR(f));
+	if (IS_ERR(f))
 		return ERR_CAST(f);
-	}
 
 	b = kzalloc(sizeof(*b) + cap, GFP_KERNEL);
 	if (!b) {
@@ -206,66 +236,45 @@ static struct ab_blob *load_prop_blob(const char *ctx)
 		return ERR_PTR(-ENOMEM);
 	}
 	kref_init(&b->ref);
-	b->len = cap;
 
 	n = read_prop_file(f, b->data, cap);
 	filp_close(f, NULL);
 	if (n <= 0) {
-		pr_warn_ratelimited("adbhide_kmod: snapshot read returned %zd\n", n);
 		kfree(b);
 		return ERR_PTR(n ? (long)n : -EIO);
 	}
 	b->len = n;
 
-	p1 = patch_value(b->data, b->len, "sys.usb.config", "mtp");
-	patch_value(b->data, b->len, "sys.usb.state", "mtp");
-	if (!p1)
-		pr_info_ratelimited("adbhide_kmod: sys.usb.config not in snapshot\n");
-	return b;
-}
-
-static void blob_work_fn(struct work_struct *w)
-{
-	struct ab_blob *nb = load_prop_blob(PROP_CTX_FILE);
-
-	if (IS_ERR(nb))
-		pr_warn_ratelimited("adbhide_kmod: blob load failed: %ld\n", PTR_ERR(nb));
-	if (!IS_ERR(nb)) {
-		struct ab_blob *old;
-
-		mutex_lock(&blob_lock);
-		old = g_blob;
-		g_blob = nb;
-		mutex_unlock(&blob_lock);
-		if (!old)
-			pr_info("adbhide_kmod: first snapshot %zu bytes\n", nb->len);
-		else
-			kref_put(&old->ref, blob_release);
+	for (i = 0; i < spec->nkeys; i++) {
+		if (patch_value(b->data, b->len, spec->keys[i].name,
+				spec->keys[i].value))
+			hit++;
 	}
-	schedule_delayed_work(to_delayed_work(w), BLOB_TTL);
-}
-
-static DECLARE_DELAYED_WORK(blob_work, blob_work_fn);
-
-/* returns a referenced snapshot, refreshed by blob_work */
-static struct ab_blob *blob_get(void)
-{
-	struct ab_blob *b = NULL;
-
-	mutex_lock(&blob_lock);
-	if (g_blob) {
-		kref_get(&g_blob->ref);
-		b = g_blob;
-	}
-	mutex_unlock(&blob_lock);
+	pr_info("adbhide_kmod: %s: %zu bytes, %u/%u keys patched\n",
+		spec->file, b->len, hit, spec->nkeys);
 	return b;
 }
 
 /* ---------- fake file_operations ---------- */
 
+static struct ab_blob *blob_get(int idx)
+{
+	struct ab_blob *b = NULL;
+
+	if (idx < 0 || idx >= AB_NCTX)
+		return NULL;
+	mutex_lock(&blob_lock);
+	if (g_blob[idx]) {
+		kref_get(&g_blob[idx]->ref);
+		b = g_blob[idx];
+	}
+	mutex_unlock(&blob_lock);
+	return b;
+}
+
 static ssize_t ab_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
-	struct ab_blob *b = blob_get();
+	struct ab_blob *b = blob_get((int)(long)file->private_data - 1);
 	ssize_t ret = 0;
 
 	if (!b)
@@ -288,7 +297,7 @@ static ssize_t ab_read(struct file *file, char __user *buf, size_t count, loff_t
 
 static ssize_t ab_read_iter(struct kiocb *iocb, struct iov_iter *to)
 {
-	struct ab_blob *b = blob_get();
+	struct ab_blob *b = blob_get((int)(long)iocb->ki_filp->private_data - 1);
 	ssize_t ret = 0;
 
 	if (!b)
@@ -354,7 +363,7 @@ static const struct vm_operations_struct ab_vm_ops = {
 
 static int ab_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	struct ab_blob *b = blob_get();
+	struct ab_blob *b = blob_get((int)(long)file->private_data - 1);
 
 	if (!b)
 		return -EIO;
@@ -363,7 +372,7 @@ static int ab_mmap(struct file *file, struct vm_area_struct *vma)
 		return -EINVAL;
 	}
 
-	vma->vm_private_data = b;   /* reference held by the vma */
+	vma->vm_private_data = b;
 	vma->vm_ops = &ab_vm_ops;
 	vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
 	return 0;
@@ -387,6 +396,7 @@ static const struct file_operations ab_fops = {
 
 struct ab_open_data {
 	bool wanted;
+	int idx;
 	struct file *file;
 };
 
@@ -395,8 +405,10 @@ static int ab_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	struct path *path = (struct path *)regs_get_kernel_argument(regs, 0);
 	struct ab_open_data *d = (struct ab_open_data *)ri->data;
 	struct dentry *dent;
+	unsigned int i;
 
 	d->wanted = false;
+	d->idx = -1;
 	d->file = (struct file *)regs_get_kernel_argument(regs, 1);
 
 	if (!redirect || !path || !path->dentry)
@@ -410,11 +422,17 @@ static int ab_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	if (dent->d_parent->d_name.len != sizeof(PROP_DIR) - 1 ||
 	    memcmp(dent->d_parent->d_name.name, PROP_DIR, sizeof(PROP_DIR) - 1))
 		return 0;
-	if (dent->d_name.len != sizeof(PROP_CTX_FILE) - 1 ||
-	    memcmp(dent->d_name.name, PROP_CTX_FILE, sizeof(PROP_CTX_FILE) - 1))
-		return 0;
 
-	d->wanted = true;
+	for (i = 0; i < AB_NCTX; i++) {
+		size_t len = strlen(g_specs[i].file);
+
+		if (dent->d_name.len == len &&
+		    memcmp(dent->d_name.name, g_specs[i].file, len) == 0) {
+			d->wanted = true;
+			d->idx = (int)i;
+			break;
+		}
+	}
 	return 0;
 }
 
@@ -427,7 +445,7 @@ static int ab_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 	if (!ri)
 		return 0;
 	d = (struct ab_open_data *)ri->data;
-	if (!d->wanted || ret != 0)
+	if (!d->wanted || d->idx < 0 || ret != 0)
 		return 0;
 
 	file = d->file;
@@ -435,9 +453,9 @@ static int ab_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 		return 0;
 
 	file->f_op = &ab_fops;
-	file->private_data = NULL;
+	file->private_data = (void *)(long)(d->idx + 1);
 	adbhide_counter_bump(CNT_REDIRECT);
-	adbhide_event_add("redir", PROP_CTX_FILE);
+	adbhide_event_add("redir", g_specs[d->idx].file);
 	return 0;
 }
 
@@ -448,6 +466,32 @@ static struct kretprobe ab_krp = {
 	.data_size = sizeof(struct ab_open_data),
 	.maxactive = 64,
 };
+
+static void blob_work_fn(struct work_struct *w)
+{
+	unsigned int i;
+	int loaded = 0;
+
+	for (i = 0; i < AB_NCTX; i++) {
+		struct ab_blob *nb = load_prop_blob(&g_specs[i]);
+		struct ab_blob *old;
+
+		if (IS_ERR(nb))
+			continue;
+		mutex_lock(&blob_lock);
+		old = g_blob[i];
+		g_blob[i] = nb;
+		mutex_unlock(&blob_lock);
+		if (old)
+			kref_put(&old->ref, blob_release);
+		loaded++;
+	}
+	if (!loaded)
+		pr_warn_ratelimited("adbhide_kmod: no property snapshot loaded\n");
+	schedule_delayed_work(to_delayed_work(w), BLOB_TTL);
+}
+
+static DECLARE_DELAYED_WORK(blob_work, blob_work_fn);
 
 int adbhide_props_init(void)
 {
@@ -469,24 +513,26 @@ int adbhide_props_init(void)
 	}
 
 	g_redirect_state = 1;
-	schedule_delayed_work(&blob_work, 8 * HZ);
-	pr_info("adbhide_kmod: redirect armed on %s\n", PROP_CTX_FILE);
+	schedule_delayed_work(&blob_work, 6 * HZ);
+	pr_info("adbhide_kmod: redirect armed on %u contexts\n", (unsigned int)AB_NCTX);
 	return 0;
 }
 
 void adbhide_props_exit(void)
 {
+	unsigned int i;
+
 	if (g_redirect_state) {
 		unregister_kretprobe(&ab_krp);
 		g_redirect_state = 0;
 	}
 	cancel_delayed_work_sync(&blob_work);
-	if (g_blob) {
+	for (i = 0; i < AB_NCTX; i++) {
 		struct ab_blob *old;
 
 		mutex_lock(&blob_lock);
-		old = g_blob;
-		g_blob = NULL;
+		old = g_blob[i];
+		g_blob[i] = NULL;
 		mutex_unlock(&blob_lock);
 		if (old)
 			kref_put(&old->ref, blob_release);
