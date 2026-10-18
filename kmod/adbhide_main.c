@@ -14,6 +14,7 @@
 #include <linux/spinlock.h>
 #include <linux/ktime.h>
 #include <linux/string.h>
+#include <linux/uaccess.h>
 #include "adbhide.h"
 
 char adbhide_targets[512] = "";
@@ -96,6 +97,52 @@ static int adbhide_proc_show(struct seq_file *m, void *v)
 	return 0;
 }
 
+/* Live uid list update: sync.sh resolves package names and writes them here,
+ * so a newly installed detector takes effect without reloading the module. */
+static ssize_t adbhide_uids_write(struct file *file, const char __user *ubuf,
+				  size_t len, loff_t *ppos)
+{
+	char buf[512];
+	size_t n = len < sizeof(buf) - 1 ? len : sizeof(buf) - 1;
+	size_t i;
+	int parsed;
+
+	if (len == 0)
+		return 0;
+	if (copy_from_user(buf, ubuf, n))
+		return -EFAULT;
+	buf[n] = '\0';
+	for (i = 0; i < n; i++) {
+		if (buf[i] == '\n' || buf[i] == ' ' || buf[i] == '\t')
+			buf[i] = ',';
+	}
+	parsed = adbhide_parse_targets(buf);
+	pr_info("adbhide_kmod: target list updated (%d uids)\n", parsed);
+	return len;
+}
+
+static int adbhide_uids_show(struct seq_file *m, void *v)
+{
+	int i, n = adbhide_target_count();
+
+	for (i = 0; i < n; i++)
+		seq_printf(m, "%u\n", adbhide_target_at(i));
+	return 0;
+}
+
+static int adbhide_uids_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, adbhide_uids_show, NULL);
+}
+
+static const struct proc_ops adbhide_uids_ops = {
+	.proc_open = adbhide_uids_open,
+	.proc_read = seq_read,
+	.proc_write = adbhide_uids_write,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+};
+
 static int adbhide_proc_open(struct inode *inode, struct file *file)
 {
 	return single_open(file, adbhide_proc_show, NULL);
@@ -130,6 +177,7 @@ static int __init adbhide_init(void)
 
 static void __exit adbhide_exit(void)
 {
+	remove_proc_entry("adbhide_uids", NULL);
 	remove_proc_entry("adbhide_kmod", NULL);
 	adbhide_vma_exit();
 	adbhide_netseq_exit();
