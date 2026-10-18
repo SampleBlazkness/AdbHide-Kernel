@@ -26,7 +26,7 @@ mk_req() {
     echo "target_uids=$_list"
 }
 
-REQ=$(mk_req)
+REQ="redirect=1 $(mk_req)"
 echo "$(date) loading ko with: $REQ" >>"$LOG"
 
 if [ -x /data/adb/ksud ]; then
