@@ -95,8 +95,6 @@ static int vma_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	d->pending = NULL;
 	if (!(flags & MAP_PRIVATE) || (flags & MAP_SHARED))
 		return 0;
-	if (!adbhide_target_count())
-		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
 		return 0;
 	if (!prop_context_file(file))
@@ -149,8 +147,6 @@ static bool vma_active;
 
 int adbhide_vma_init(void)
 {
-	if (!adbhide_target_count())
-		return 0;
 	if (register_kretprobe(&vma_krp)) {
 		pr_warn("adbhide_kmod: vm_mmap_pgoff probe failed\n");
 		return -ENOENT;
