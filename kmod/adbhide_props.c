@@ -29,7 +29,7 @@
 #include <linux/version.h>
 #include "adbhide.h"
 
-#define PROP_CTX_FILE "usb_control_prop"
+#define PROP_CTX_FILE "u:object_r:usb_control_prop:s0"
 #define PROP_DIR      "__properties__"
 
 static int redirect;
