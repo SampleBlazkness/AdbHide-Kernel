@@ -55,6 +55,14 @@ sh "$MODDIR/rules.sh"
 HAVE_APK=0
 pm list packages 2>/dev/null | grep -q "^package:com.blazkness.adbhide$" && HAVE_APK=1
 
+# The app owns the list. Without it there is nothing to read, so drop the
+# config instead of leaving a stale blacklist behind.
+if [ "$HAVE_APK" = 0 ]; then
+    rm -f /data/adb/adbhide/blacklist.conf /data/adb/adbhide/uids.txt
+    [ -w /proc/adbhide_uids ] && : > /proc/adbhide_uids
+    echo "$(date) sync: core app missing, config removed" >>"$LOG"
+fi
+
 set_desc() {
     _p="$1"
     [ -f "$_p" ] || return 0
