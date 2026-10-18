@@ -6,7 +6,7 @@
 #include <linux/cred.h>
 #include <linux/sched.h>
 
-#define ADBHIDE_KVER      "0.2.0"
+#define ADBHIDE_KVER      "0.3.0"
 #define ADBHIDE_MAX_UIDS  64
 #define ADBHIDE_MAX_EVENTS 64
 
