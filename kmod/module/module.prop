@@ -1,6 +1,6 @@
 id=adbhide_kmod
 name=AdbHide Kernel
-version=v1.1.1
-versionCode=21
+version=v1.1.2
+versionCode=22
 author=Blazkness
 description=Kernel-level ADB hiding for selected apps. M5: patched property areas for target uids, adbd listener rows removed from /proc/net/tcp{,6}, and the private property remap restored to a shared-looking VMA.

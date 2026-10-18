@@ -501,10 +501,6 @@ int adbhide_props_init(void)
 		pr_info("adbhide_kmod: redirect disabled\n");
 		return 0;
 	}
-	if (!adbhide_target_count()) {
-		pr_warn("adbhide_kmod: redirect needs target uids\n");
-		return 0;
-	}
 
 	ret = register_kretprobe(&ab_krp);
 	if (ret) {
