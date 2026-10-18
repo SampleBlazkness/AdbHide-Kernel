@@ -88,6 +88,16 @@ public class MainActivity extends Activity {
         root.addView(scroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
+        Button sync = new Button(this);
+        sync.setText("同步名单(包名 → uid)");
+        sync.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                syncList();
+            }
+        });
+        root.addView(sync);
+
         Button refresh = new Button(this);
         refresh.setText("刷新");
         refresh.setOnClickListener(new View.OnClickListener() {
@@ -107,6 +117,27 @@ public class MainActivity extends Activity {
 
         setContentView(root);
         refresh();
+    }
+
+    private void syncList() {
+        hint.setText("正在同步…");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Process p = Runtime.getRuntime().exec(new String[]{"su", "-c",
+                            "sh /data/adb/modules/adbhide_kmod/sync.sh"});
+                    p.waitFor();
+                } catch (Throwable ignored) {
+                }
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        refresh();
+                    }
+                });
+            }
+        }).start();
     }
 
     private void refresh() {
