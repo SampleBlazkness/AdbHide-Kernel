@@ -170,6 +170,8 @@ static int __init adbhide_init(void)
 
 	if (!proc_create("adbhide_kmod", 0444, NULL, &adbhide_proc_ops))
 		pr_warn("adbhide_kmod: /proc entry not created\n");
+	if (!proc_create("adbhide_uids", 0644, NULL, &adbhide_uids_ops))
+		pr_warn("adbhide_kmod: /proc/adbhide_uids not created\n");
 
 	pr_info("adbhide_kmod %s loaded (targets=%d)\n", ADBHIDE_KVER, n);
 	return 0;
