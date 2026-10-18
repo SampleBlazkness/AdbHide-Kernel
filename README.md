@@ -45,8 +45,8 @@ tools/build-apk.sh       aapt2 -> javac -> d8 -> apksigner, no Gradle
 
 - [x] M0 — repository, license, CI skeleton
 - [x] M1 — minimal module loads, `/proc/adbhide_kmod` readable
-- [ ] M2 — read-only probes (code complete, device verification pending)
-- [ ] M3 — property redirect for one key, verified with `getprop`
+- [x] M2 — read-only probes (vfs_open / seq_read), verified on device
+- [x] M3 — property redirect for `usb_control_prop` (sys.usb.config → mtp), verified per uid
 - [ ] M4 — `/proc/net/tcp` filtering
 - [ ] M5 — config integration, package, drop the Zygisk module
 
