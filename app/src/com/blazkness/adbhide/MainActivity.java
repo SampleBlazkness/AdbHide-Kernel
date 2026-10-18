@@ -35,12 +35,16 @@ public class MainActivity extends Activity {
             "  echo KPROBES=$(sed -n 's/^probes //p' $p)\n" +
             "  echo KCOUNTERS=$(sed -n 's/^counters //p' $p)\n" +
             "  echo KTARGETS=$(sed -n 's/^targets [0-9]*://p' $p)\n" +
+            "  echo KREDIR=$(sed -n 's/^redirect //p' $p)\n" +
+            "  echo KNETSEQ=$(sed -n 's/^netseq //p' $p)\n" +
             "fi\n" +
             "d=/data/adb/modules/adbhide_kmod\n" +
             "echo MODULE=$([ -d $d ] && echo 1 || echo 0)\n" +
             "echo MODDISABLED=$([ -e $d/disable ] && echo 1 || echo 0)\n" +
+            "echo NATIVE=$([ -f /data/adb/modules/adbhide_native/zygisk/arm64-v8a.so ] && echo 1 || echo 0)\n" +
             "echo UIDS=$(tr '\\n' ' ' < /data/adb/adbhide/uids.txt 2>/dev/null)\n" +
-            "echo RULES=$(iptables -S ADBHIDE 2>/dev/null | wc -l | tr -d ' ')\n";
+            "echo PORTS=$(iptables -S ADBHIDE_PORTS 2>/dev/null | grep -c uid-owner)\n" +
+            "echo MDNS=$(iptables -S ADBHIDE_MDNS_G 2>/dev/null | grep -c string)\\n";
 
     private TextView status;
     private TextView hint;
@@ -61,7 +65,7 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("LSPosed 层 · 默认伪装已启用");
+        subtitle.setText("内核 + Native + LSPosed · 默认启用");
         subtitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         subtitle.setTextColor(Color.GRAY);
         root.addView(subtitle);
@@ -136,22 +140,25 @@ public class MainActivity extends Activity {
         if (v.containsKey("KPROBES")) {
             sb.append("  探针 ").append(nz(v.get("KPROBES"))).append('\n');
         }
+        if (v.containsKey("KREDIR")) {
+            sb.append("  属性层 ").append(nz(v.get("KREDIR"))).append('\n');
+        }
+        if (v.containsKey("KNETSEQ")) {
+            sb.append("  网络层 ").append(nz(v.get("KNETSEQ"))).append('\n');
+        }
         if (v.containsKey("KCOUNTERS")) {
             sb.append("  计数 ").append(nz(v.get("KCOUNTERS"))).append('\n');
         }
 
         sb.append('\n');
-        sb.append("模块目录\n");
-        sb.append("  ").append(line(haveRoot, "1".equals(v.get("MODULE")),
-                "已安装", "未安装"));
-        if ("1".equals(v.get("MODDISABLED"))) {
-            sb.append("(已被禁用)");
-        }
-        sb.append('\n');
+        sb.append("Native 层 (Zygisk)\n");
+        sb.append("  ").append(line(haveRoot, "1".equals(v.get("NATIVE")),
+                "已安装 · 目标进程属性映射已私有化", "未安装")).append('\n');
 
         sb.append('\n');
-        sb.append("端口层\n");
-        sb.append("  ").append(haveRoot ? "iptables ADBHIDE " + nz(v.get("RULES")) + " 条规则"
+        sb.append("网络层规则\n");
+        sb.append("  ").append(haveRoot
+                ? "adbd 端口 REJECT " + nz(v.get("PORTS")) + " 条 · mDNS 丢弃 " + nz(v.get("MDNS")) + " 条"
                 : "无法读取(需要 root)").append('\n');
 
         sb.append('\n');
