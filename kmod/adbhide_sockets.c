@@ -307,6 +307,15 @@ static int connect_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 
 	d->hit = false;
 	d->adbd = false;
+	{
+		static bool dbg_done;
+		if (!dbg_done && addr && adbhide_uid_is_target(adbhide_uid_now())) {
+			dbg_done = true;
+			pr_info("adbhide dbg: fam=%d len=%d raw=%*phN
+",
+				addr->sa_family, len, 24, (const u8 *)addr);
+		}
+	}
 	if (!adbhide_target_count())
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
