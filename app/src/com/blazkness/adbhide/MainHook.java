@@ -10,6 +10,7 @@ import java.util.Map;
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
+import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
@@ -71,6 +72,7 @@ public class MainHook implements IXposedHookLoadPackage {
                 return;
             }
             hookSystemProperties(lp);
+            hookNsd(lp);
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": load " + lp.packageName + " failed: " + t);
         }
@@ -180,6 +182,45 @@ public class MainHook implements IXposedHookLoadPackage {
 
         appHooked = true;
         XposedBridge.log(TAG + ": SystemProperties hooks installed in " + lp.packageName);
+    }
+
+    private void hookNsd(XC_LoadPackage.LoadPackageParam lp) {
+        try {
+            Class<?> info = XposedHelpers.findClass("android.net.nsd.NsdServiceInfo", lp.classLoader);
+
+            XC_MethodHook scrub = new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Object r = param.getResult();
+                    if (r instanceof String && ((String) r).contains("_adb")) {
+                        param.setResult("_hidden._tcp");
+                    }
+                }
+            };
+            XposedHelpers.findAndHookMethod(info, "getServiceType", scrub);
+            XposedHelpers.findAndHookMethod(info, "getServiceName", scrub);
+
+            Class<?> listener = XposedHelpers.findClass(
+                    "android.net.nsd.NsdManager$DiscoveryListener", lp.classLoader);
+            Class<?> mgr = XposedHelpers.findClass("android.net.nsd.NsdManager", lp.classLoader);
+
+            XposedHelpers.findAndHookMethod(mgr, "discoverServices", String.class, int.class,
+                    listener, new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            Object t = param.args[0];
+                            if (t instanceof String
+                                    && ((String) t).toLowerCase().contains("_adb")) {
+                                param.setResult(null);
+                                XposedBridge.log(TAG + ": blocked NsdManager discovery of " + t);
+                            }
+                        }
+                    });
+
+            XposedBridge.log(TAG + ": NsdManager hooks installed in " + lp.packageName);
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": NsdManager hook failed: " + t);
+        }
     }
 
     private static String firstString(XC_MethodHook.MethodHookParam param) {
