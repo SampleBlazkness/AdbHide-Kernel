@@ -3,17 +3,38 @@ name: build
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   kmod:
+    name: kmod-${{ matrix.kmi }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kmi: android12-5.10
+            image: android12-5.10-20260828
+          - kmi: android13-5.10
+            image: android13-5.10-20260828
+          - kmi: android13-5.15
+            image: android13-5.15-20260828
+          - kmi: android14-5.15
+            image: android14-5.15-20260828
+          - kmi: android14-6.1
+            image: android14-6.1-20260828
+          - kmi: android15-6.6
+            image: android15-6.6-20260828
+          - kmi: android16-6.12
+            image: android16-6.12-20260828
     container:
-      image: ghcr.io/ylarod/ddk-min:android15-6.6-20260313
+      image: ghcr.io/ylarod/ddk-min:${{ matrix.image }}
     env:
-      KMI: android15-6.6
+      KMI: ${{ matrix.kmi }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,7 +47,7 @@ jobs:
       - name: Build module
         run: |
           set -eu
-          make -C kmod strip
+          make -C kmod strip KERNEL_SRC="/opt/ddk/kdir/${KMI}"
           file kmod/adbhide_kmod.ko
           ls -l kmod/adbhide_kmod.ko
 
@@ -36,7 +57,8 @@ jobs:
           python3 - <<'PY'
           import os, stat, zipfile
 
-          out = os.environ.get("ZIP_NAME", "adbhide-kmod-android15-6.6.zip")
+          kmi = os.environ["KMI"]
+          out = f"adbhide-kmod-{kmi}.zip"
           stage = "kmod/module"
           with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
               for root, _dirs, files in os.walk(stage):
@@ -60,6 +82,141 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: adbhide-kmod-${{ env.KMI }}
-          path: adbhide-kmod-${{ env.KMI }}.zip
+          name: adbhide-kmod-${{ matrix.kmi }}
+          path: adbhide-kmod-${{ matrix.kmi }}.zip
+          if-no-files-found: error
+
+  native:
+    name: native-zygisk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+
+      - name: Build arm64-v8a
+        run: |
+          set -eu
+          mkdir -p native/build/zygisk
+          "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang++" \
+            -shared -fPIC -O2 -std=c++17 -DNDEBUG \
+            -I native \
+            native/adbhide_native.cpp \
+            -o native/build/zygisk/arm64-v8a.so \
+            -llog
+          file native/build/zygisk/arm64-v8a.so
+          ls -l native/build/zygisk/arm64-v8a.so
+
+      - name: Package Zygisk zip
+        run: |
+          set -eu
+          python3 - <<'PY'
+          import os, stat, zipfile
+
+          out = "AdbHide-native-v1.0.2-ci.zip"
+          with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+              zi = zipfile.ZipInfo("module.prop")
+              zi.external_attr = (stat.S_IFREG | 0o644) << 16
+              z.writestr(zi, open(os.path.join("native", "module.prop"), "rb").read())
+              zi = zipfile.ZipInfo("zygisk/arm64-v8a.so")
+              zi.external_attr = (stat.S_IFREG | 0o644) << 16
+              zi.compress_type = zipfile.ZIP_DEFLATED
+              z.writestr(zi, open("native/build/zygisk/arm64-v8a.so", "rb").read())
+          print(out, os.path.getsize(out), "bytes")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adbhide-native
+          path: AdbHide-native-v1.0.2-ci.zip
+          if-no-files-found: error
+
+  apk:
+    name: manager-apk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install build-tools and platform
+        run: |
+          set -eu
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Build APK
+        run: |
+          set -eu
+          SDK="$ANDROID_HOME"
+          BT="$SDK/build-tools/36.0.0"
+          PLATFORM="$SDK/platforms/android-36/android.jar"
+          APP="$(pwd)/app"
+          OUT="$(pwd)/build/apk"
+          VERSION_NAME="1.3.1"
+          VERSION_CODE=30
+
+          rm -rf "$OUT"
+          mkdir -p "$OUT/stubs-classes" "$OUT/classes" "$OUT/gen" "$OUT/dex"
+
+          echo "[1/6] stubs"
+          find "$APP/stubs" -name '*.java' > "$OUT/stubs.list"
+          javac --release 11 -nowarn -encoding UTF-8 -d "$OUT/stubs-classes" @"$OUT/stubs.list"
+          (cd "$OUT/stubs-classes" && jar cf "$OUT/stubs.jar" .)
+
+          echo "[2/6] resources"
+          "$BT/aapt2" compile --dir "$APP/res" -o "$OUT/res.zip"
+          "$BT/aapt2" link -o "$OUT/base.apk" -I "$PLATFORM" \
+            --manifest "$APP/AndroidManifest.xml" \
+            --min-sdk-version 26 --target-sdk-version 33 \
+            --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" \
+            -R "$OUT/res.zip" --java "$OUT/gen" --auto-add-overlay
+
+          echo "[3/6] javac"
+          { find "$APP/src" -name '*.java'; find "$OUT/gen" -name '*.java'; } > "$OUT/src.list"
+          javac --release 11 -nowarn -encoding UTF-8 \
+            -cp "$PLATFORM:$OUT/stubs.jar" -d "$OUT/classes" @"$OUT/src.list"
+          (cd "$OUT/classes" && jar cf "$OUT/classes.jar" .)
+
+          echo "[4/6] d8"
+          "$BT/d8" --lib "$PLATFORM" --min-api 26 --output "$OUT/dex" "$OUT/classes.jar"
+
+          echo "[5/6] package"
+          python3 - "$OUT" "$APP" <<'PY'
+          import os, sys, zipfile
+          out, app = sys.argv[1], sys.argv[2]
+          src = os.path.join(out, "base.apk")
+          dst = os.path.join(out, "unsigned.apk")
+          with zipfile.ZipFile(src) as zi, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zo:
+              for item in zi.infolist():
+                  zo.writestr(item, zi.read(item.filename))
+              zo.write(os.path.join(out, "dex", "classes.dex"), "classes.dex")
+              zo.write(os.path.join(app, "assets", "xposed_init"), "assets/xposed_init")
+          print("  packed", dst)
+          PY
+          "$BT/zipalign" -f 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
+
+          echo "[6/6] sign (CI key)"
+          keytool -genkeypair -keystore "$OUT/ci.jks" -storepass android -keypass android \
+            -alias ci -keyalg RSA -keysize 2048 -validity 3650 \
+            -dname "CN=AdbHide CI" >/dev/null 2>&1
+          "$BT/apksigner" sign --ks "$OUT/ci.jks" --ks-pass pass:android --key-pass pass:android \
+            --min-sdk-version 26 --out "AdbHide-${VERSION_NAME}-ci.apk" "$OUT/aligned.apk"
+          "$BT/apksigner" verify --print-certs "AdbHide-${VERSION_NAME}-ci.apk" | head -4
+          ls -l "AdbHide-${VERSION_NAME}-ci.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adbhide-manager-apk
+          path: AdbHide-1.3.1-ci.apk
           if-no-files-found: error
