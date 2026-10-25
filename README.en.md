@@ -123,7 +123,7 @@ until a module is disabled.
 su -c 'cat /proc/adbhide_kmod'                 # module state, counters, target uids
 su -c 'cat /proc/adbhide_uids'                 # live kernel list
 su 10361 -c 'getprop persist.sys.usb.config'   # -> mtp
-iptables -S ADBHIDE_PORTS                      # adbd port resets per uid
+su -c 'iptables -S ADBHIDE_PORTS'               # adbd port resets per uid
 ```
 
 ## Build
@@ -135,17 +135,24 @@ Kernel modules are built in CI with the DDK images
 make -C kmod strip KERNEL_SRC=/opt/ddk/kdir/android15-6.6
 ```
 
-Zygisk library (NDK r27c):
+Zygisk library (NDK r27c or newer):
 
 ```bash
-tools/build-native.sh          # uses $ANDROID_NDK_HOME or D:/Android_SDK/ndk/android-ndk-r27c
+export ANDROID_NDK_HOME=/path/to/android-ndk
+tools/build-native.sh
 ```
 
 Manager APK (aapt2 -> javac -> d8 -> apksigner, no Gradle):
 
 ```bash
+export ANDROID_SDK_ROOT=/path/to/android-sdk
 tools/build-apk.sh
 ```
+
+Both scripts run on Windows (Git Bash / MSYS2), Linux and macOS, and pick the
+newest build-tools and platform automatically. The APK signing key is read from
+`~/.android/adbhide-release.properties` (override with `RELEASE_PROPS`); that
+file is not tracked.
 
 ## License
 

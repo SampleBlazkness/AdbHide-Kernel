@@ -1,15 +1,28 @@
 #!/usr/bin/env bash
 # Build the Zygisk native module and package it as a flashable zip.
-# Requires the Android NDK (r27c by default) and python3 for packaging.
+# Requires the Android NDK (r27c or newer) and python3 for packaging.
 set -euo pipefail
 
-NDK="${ANDROID_NDK_HOME:-D:/Android_SDK/ndk/android-ndk-r27c}"
-ROOT="$(cd "$(dirname "$0")/.." && pwd -W)"
+# Prebuilt toolchain directory and executable suffix differ per host.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) HOST=windows-x86_64; EXE=.cmd ;;
+  Linux)                HOST=linux-x86_64;   EXE= ;;
+  Darwin)               HOST=darwin-x86_64;  EXE= ;;
+  *) echo "unsupported host: $(uname -s)"; exit 1 ;;
+esac
+
+NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
+[ -n "$NDK" ] || {
+  echo "ANDROID_NDK_HOME is not set (point it at the NDK, r27c or newer)"
+  exit 1
+}
+
+ROOT="$(cd "$(dirname "$0")/.." && { pwd -W 2>/dev/null || pwd; })"
 OUT="$ROOT/build/native"
 DIST="$ROOT/dist"
 TARGET="arm64-v8a"
 API="26"
-CC="$NDK/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android${API}-clang++.cmd"
+CC="$NDK/toolchains/llvm/prebuilt/$HOST/bin/aarch64-linux-android${API}-clang++$EXE"
 
 [ -f "$CC" ] || { echo "clang++ not found: $CC"; exit 1; }
 

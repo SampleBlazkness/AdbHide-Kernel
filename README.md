@@ -96,7 +96,7 @@ uname -r
 su -c 'cat /proc/adbhide_kmod'                 # 模块状态、计数、目标 uid
 su -c 'cat /proc/adbhide_uids'                 # 内核当前的名单
 su 10361 -c 'getprop persist.sys.usb.config'   # -> mtp
-iptables -S ADBHIDE_PORTS                      # 每个 uid 的 adbd 端口规则
+su -c 'iptables -S ADBHIDE_PORTS'                # 每个 uid 的 adbd 端口规则
 ```
 
 ## 构建
@@ -107,17 +107,21 @@ iptables -S ADBHIDE_PORTS                      # 每个 uid 的 adbd 端口规�
 make -C kmod strip KERNEL_SRC=/opt/ddk/kdir/android15-6.6
 ```
 
-Zygisk 库（NDK r27c）：
+Zygisk 库（需要 NDK r27c 或更新）：
 
 ```bash
-tools/build-native.sh          # 使用 $ANDROID_NDK_HOME 或 D:/Android_SDK/ndk/android-ndk-r27c
+export ANDROID_NDK_HOME=/path/to/android-ndk
+tools/build-native.sh
 ```
 
 管理器 APK（aapt2 → javac → d8 → apksigner，不走 Gradle）：
 
 ```bash
+export ANDROID_SDK_ROOT=/path/to/android-sdk
 tools/build-apk.sh
 ```
+
+两个脚本在 Windows（Git Bash / MSYS2）、Linux 和 macOS 上都能运行，会自动选择最新的 build-tools 和 platform。APK 签名密钥从 `~/.android/adbhide-release.properties` 读取（可用 `RELEASE_PROPS` 指定别的路径），该文件不入库。
 
 ## 许可
 
