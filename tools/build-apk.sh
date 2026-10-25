@@ -53,13 +53,16 @@ PY
 "$BT/zipalign.exe" -f 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
 
 echo "[6/6] sign"
-KS="$(cygpath -w "$HOME/.android/debug.keystore")"
-if [ ! -f "$KS" ]; then
-  keytool -genkeypair -keystore "$KS" -storepass android -keypass android \
-    -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" \
-    -keyalg RSA -keysize 2048 -validity 10000
-fi
-"$BT/apksigner.bat" sign --ks "$KS" --ks-pass pass:android --key-pass pass:android \
-  --min-sdk-version 26 --out "$ROOT/dist/AdbHide-$VERSION_NAME.apk" "$OUT/aligned.apk"
-"$BT/apksigner.bat" verify --print-certs "$ROOT/dist/AdbHide-$VERSION_NAME.apk" | head -4
-ls -l "$ROOT/dist/AdbHide-$VERSION_NAME.apk"
+# Release key: kept outside the repo; the properties file below names it
+PROPS="${RELEASE_PROPS:-$HOME/.android/adbhide-release.properties}"
+[ -f "$PROPS" ] || { echo "missing $PROPS"; exit 1; }
+prop() { sed -n "s/^$1=//p" "$PROPS" | head -1; }
+KS="$(cygpath -w "$(prop storeFile)")"
+KSPASS="$(prop storePassword)"
+ALIAS="$(prop keyAlias)"
+KEYPASS="$(prop keyPassword)"
+APK="$ROOT/dist/AdbHide-$VERSION_NAME.apk"
+"$BT/apksigner.bat" sign --ks "$KS" --ks-pass "pass:$KSPASS" --ks-key-alias "$ALIAS" \
+  --key-pass "pass:$KEYPASS" --min-sdk-version 26 --out "$APK" "$OUT/aligned.apk"
+"$BT/apksigner.bat" verify --print-certs "$APK" | head -4
+ls -l "$APK"
