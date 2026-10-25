@@ -3,10 +3,25 @@
 # Everything comes from the local Android SDK; no network access needed.
 set -euo pipefail
 
-SDK="${ANDROID_SDK_ROOT:-D:/Android_SDK}"
-BT="$SDK/build-tools/36.0.0"
-PLATFORM="$SDK/platforms/android-37.0/android.jar"
-ROOT="$(cd "$(dirname "$0")/.." && pwd -W)"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) BIN=.exe; SCRIPT=.bat ;;
+  *)                    BIN=;     SCRIPT= ;;
+esac
+
+SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+[ -n "$SDK" ] || {
+  echo "ANDROID_SDK_ROOT is not set (point it at the Android SDK)"
+  exit 1
+}
+
+BT="$(ls -d "$SDK/build-tools"/* 2>/dev/null | sort -V | tail -1)"
+PLATFORM="$(ls -d "$SDK/platforms"/android-* 2>/dev/null | sort -V | tail -1)/android.jar"
+[ -n "$BT" ] && [ -f "$PLATFORM" ] || {
+  echo "build-tools or platform not found under $SDK"
+  exit 1
+}
+
+ROOT="$(cd "$(dirname "$0")/.." && { pwd -W 2>/dev/null || pwd; })"
 APP="$ROOT/app"
 OUT="$ROOT/build/apk"
 VERSION_NAME="1.3.1"
@@ -21,8 +36,8 @@ javac --release 11 -nowarn -encoding UTF-8 -d "$OUT/stubs-classes" @"$OUT/stubs.
 (cd "$OUT/stubs-classes" && jar cf "$OUT/stubs.jar" .)
 
 echo "[2/6] resources"
-"$BT/aapt2.exe" compile --dir "$APP/res" -o "$OUT/res.zip"
-"$BT/aapt2.exe" link -o "$OUT/base.apk" -I "$PLATFORM" \
+"$BT/aapt2$BIN" compile --dir "$APP/res" -o "$OUT/res.zip"
+"$BT/aapt2$BIN" link -o "$OUT/base.apk" -I "$PLATFORM" \
   --manifest "$APP/AndroidManifest.xml" \
   --min-sdk-version 26 --target-sdk-version 33 \
   --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" \
@@ -35,7 +50,7 @@ javac --release 11 -nowarn -encoding UTF-8 \
 (cd "$OUT/classes" && jar cf "$OUT/classes.jar" .)
 
 echo "[4/6] d8"
-"$BT/d8.bat" --lib "$PLATFORM" --min-api 26 --output "$OUT/dex" "$OUT/classes.jar"
+"$BT/d8$SCRIPT" --lib "$PLATFORM" --min-api 26 --output "$OUT/dex" "$OUT/classes.jar"
 
 echo "[5/6] package"
 python - "$OUT" "$APP" <<'PY'
@@ -50,19 +65,20 @@ with zipfile.ZipFile(src) as zi, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED)
     zo.write(os.path.join(app, "assets", "xposed_init"), "assets/xposed_init")
 print("  packed", dst)
 PY
-"$BT/zipalign.exe" -f 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
+"$BT/zipalign$BIN" -f 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
 
 echo "[6/6] sign"
 # Release key: kept outside the repo; the properties file below names it
 PROPS="${RELEASE_PROPS:-$HOME/.android/adbhide-release.properties}"
 [ -f "$PROPS" ] || { echo "missing $PROPS"; exit 1; }
 prop() { sed -n "s/^$1=//p" "$PROPS" | head -1; }
-KS="$(cygpath -w "$(prop storeFile)")"
+KS="$(prop storeFile)"
+command -v cygpath >/dev/null 2>&1 && KS="$(cygpath -w "$KS")"
 KSPASS="$(prop storePassword)"
 ALIAS="$(prop keyAlias)"
 KEYPASS="$(prop keyPassword)"
 APK="$ROOT/dist/AdbHide-$VERSION_NAME.apk"
-"$BT/apksigner.bat" sign --ks "$KS" --ks-pass "pass:$KSPASS" --ks-key-alias "$ALIAS" \
+"$BT/apksigner$SCRIPT" sign --ks "$KS" --ks-pass "pass:$KSPASS" --ks-key-alias "$ALIAS" \
   --key-pass "pass:$KEYPASS" --min-sdk-version 26 --out "$APK" "$OUT/aligned.apk"
-"$BT/apksigner.bat" verify --print-certs "$APK" | head -4
+"$BT/apksigner$SCRIPT" verify --print-certs "$APK" | head -4
 ls -l "$APK"
