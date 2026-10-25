@@ -65,10 +65,17 @@ jobs:
                   for f in sorted(files):
                       p = os.path.join(root, f)
                       arc = os.path.relpath(p, stage)
+                      if arc == "module.prop":
+                          continue
                       zi = zipfile.ZipInfo(arc)
                       zi.external_attr = (stat.S_IFREG | (0o755 if f.endswith(".sh") else 0o644)) << 16
                       zi.compress_type = zipfile.ZIP_DEFLATED
                       z.writestr(zi, open(p, "rb").read())
+              prop = open(os.path.join(stage, "module.prop"), "r", encoding="utf-8").read()
+              prop = prop.replace("description=", f"description=[{kmi}] ", 1)
+              zi = zipfile.ZipInfo("module.prop")
+              zi.external_attr = (stat.S_IFREG | 0o644) << 16
+              z.writestr(zi, prop.encode("utf-8"))
               zi = zipfile.ZipInfo("adbhide_kmod.ko")
               zi.external_attr = (stat.S_IFREG | 0o644) << 16
               zi.compress_type = zipfile.ZIP_DEFLATED
