@@ -1,152 +1,124 @@
 # AdbHide-Kernel
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+[简体中文](README.md) | [English](README.en.md)
 
-**Kernel-level ADB hiding for Android.** Apps on the blacklist see no debugging
-state; you and your computer keep working normally.
+**内核级 ADB 隐藏。** 名单里的应用看不到调试状态，而你自己和电脑照常使用。
 
 > [!WARNING]
-> **This is a kernel module. Read this before installing.**
+> **这是一个内核模块，安装前请先读完这一段。**
 >
-> - Verified on exactly **one** device: Redmi K90 (2510DRK44C), Android 16,
->   kernel `6.6.77-android15-8-g4a507830d890-ab13636293-4k`, KernelSU 3.3.x.
-> - Modules for the other kernel versions are **compiled by CI but have never
->   been booted**. They may not load, may hide nothing, or may crash the kernel.
-> - A module built for the wrong kernel, or loaded on a vendor kernel that does
->   not match its KMI, can cause a **kernel panic, boot loop or data loss**.
-> - Keep a working rescue path before you flash anything (see
->   [If it boot loops](#if-it-boot-loops)). Do not install this on a phone you
->   cannot recover.
+> - 只在 **一台** 设备上验证过：Redmi K90（2510DRK44C），Android 16，内核 `6.6.77-android15-8-g4a507830d890-ab13636293-4k`，KernelSU 3.3.x。
+> - 其他内核版本的模块 **只经过 CI 编译，从未真正开机加载过**。它们可能加载失败、可能什么都不隐藏，也可能把内核搞崩。
+> - 刷错内核版本，或者在和 KMI 不匹配的厂商内核上加载，可能导致 **内核 panic、无限重启或数据丢失**。
+> - 刷之前先准备好能救砖的手段（见 [开机循环怎么办](#开机循环怎么办)）。不能自救的手机不要装。
 
-## Requirements
+## 环境要求
 
-- arm64 device, Android 12-16, **GKI kernel**
-- KernelSU or KernelSU Next (the module is installed through it)
-- LSPosed (Zygisk) for the manager app
-- Android 11 is **not supported**: no GKI 2.0 KMI and no build target
+- arm64 设备，Android 12–16，**GKI 内核**
+- KernelSU 或 KernelSU Next（模块通过它安装）
+- LSPosed（Zygisk），管理器应用需要它
+- **不支持 Android 11**：没有对应的 GKI 2.0 KMI，也没有构建目标
 
-## Pick the right kernel module first
+## 先选对内核模块
 
-The zip is chosen by **kernel version**, not by the Android version shown in
-Settings. Run this in a terminal (or check your kernel in the KernelSU manager):
+选哪个 zip 取决于 **内核版本**，不是设置里显示的 Android 版本。在终端里执行（或在 KernelSU 管理器里看内核版本）：
 
 ```bash
 uname -r
 ```
 
-| Kernel line (`uname -r`) | Android (typical) | File to install |
+| 内核版本（`uname -r`） | 常见 Android 版本 | 要安装的文件 |
 |---|---|---|
 | `5.10.x-android12-*` | 12 | `adbhide-kmod-android12-5.10.zip` |
 | `5.10.x-android13-*` | 13 | `adbhide-kmod-android13-5.10.zip` |
 | `5.15.x-android13-*` | 13 | `adbhide-kmod-android13-5.15.zip` |
 | `5.15.x-android14-*` | 14 | `adbhide-kmod-android14-5.15.zip` |
 | `6.1.x-android14-*` | 14 | `adbhide-kmod-android14-6.1.zip` |
-| `6.6.x-android15-*` | 15, and the tested Android 16 device | `adbhide-kmod-android15-6.6.zip` |
+| `6.6.x-android15-*` | 15，以及测试用的 Android 16 设备 | `adbhide-kmod-android15-6.6.zip` |
 | `6.12.x-android16-*` | 16 | `adbhide-kmod-android16-6.12.zip` |
 
-The tested Redmi K90 runs **Android 16 on a 6.6 kernel**, so it uses the
-`android15-6.6` build. Using the Android version as the only hint is the most
-common way to install the wrong module.
+测试用的 Redmi K90 是 **Android 16 + 6.6 内核**，所以它用的是 `android15-6.6`，不是 `android16-6.12`。只按 Android 版本选，是最常见的刷错原因。
 
-## What it is made of
+## 组成
 
-| Component | Role |
+| 组件 | 作用 |
 |---|---|
-| `AdbHide` (LSPosed APK) | Parent. Owns the blacklist, the status panel and the `Settings.Global` spoof |
-| `adbhide_kmod` (kernel module) | Property-area redirect for `getprop`, `/proc/net/tcp{,6}` filtering, VMA flag restore |
-| `adbhide_native` (Zygisk) | Rewrites the property mapping inside target app processes |
+| `AdbHide`（LSPosed 应用） | 父节点。管理名单、状态面板和 `Settings.Global` 伪造 |
+| `adbhide_kmod`（内核模块） | 属性区重定向、`/proc/net/tcp{,6}` 过滤、VMA 标志还原 |
+| `adbhide_native`（Zygisk 模块） | 在目标进程内改写属性映射 |
 
-The kernel and Zygisk modules only read config produced by the app. Without the
-app they report `core app not installed` and hide nothing.
+内核模块和 Zygisk 模块只读应用产生的配置。没有应用时，模块描述会显示“核心应用未安装”，并且不做任何隐藏。
 
-## Install
+## 安装
 
-1. Install the kernel module zip that matches `uname -r` in KernelSU, **do not
-   reboot yet**.
-2. Install `AdbHide-native-v*.zip` in KernelSU as well.
-3. Reboot.
-4. Install `AdbHide-*.apk`, open it once and grant root in the KernelSU manager.
-5. In LSPosed, enable **AdbHide** and tick the **system framework** scope.
-6. Reboot.
+1. 在 KernelSU 里安装与你 `uname -r` 对应的内核模块 zip，**先不要重启**。
+2. 接着安装 `AdbHide-native-v*.zip`。
+3. 重启。
+4. 安装 `AdbHide-*.apk`，打开一次，在 KernelSU 管理器里授予 root。
+5. 在 LSPosed 里启用 **AdbHide**，作用域勾选 **系统框架**。
+6. 重启。
 
-On first launch the app writes the default blacklist (six common detectors) to
-`/data/adb/adbhide/blacklist.conf`.
+首次打开应用会写入默认名单（6 个常用检测器）到 `/data/adb/adbhide/blacklist.conf`。
 
-If the phone does not boot after step 3, go to
-[If it boot loops](#if-it-boot-loops) immediately - do not keep rebooting.
+如果第 3 步之后开不了机，立刻看 [开机循环怎么办](#开机循环怎么办)，不要反复重启。
 
-## Use
+## 使用
 
-- **Add or remove an app**: edit `/data/adb/adbhide/blacklist.conf`, one package
-  name per line, then tap **sync list** in the panel. No reboot: the list is
-  pushed into the kernel through `/proc/adbhide_uids` and the netfilter rules are
-  rebuilt.
-- **Check it works**: the panel shows the kernel module, the native module, the
-  Settings layer and the port rules; each line is green when active.
-- **Uninstall**: remove the app, then uninstall both KernelSU modules and reboot.
+- **增删应用**：编辑 `/data/adb/adbhide/blacklist.conf`，一行一个包名，然后在面板里点 **同步名单**。不需要重启：名单经 `/proc/adbhide_uids` 实时写入内核，netfilter 规则同时重建。
+- **确认生效**：面板会列出内核模块、Native 模块、系统设置层和端口规则，生效的都打勾。
+- **卸载**：删掉应用，再在 KernelSU 里卸载两个模块，重启。
 
-## If it boot loops
+## 开机循环怎么办
 
-A kernel module that panics during boot leaves no UI to tap. Use one of these,
-in order:
+内核模块在启动阶段 panic 时，界面上没有任何可点的东西。按顺序尝试：
 
-1. **KernelSU safe mode** - hold **Volume Down** while the phone boots. KernelSU
-   then starts without loading modules, so the phone boots normally.
-2. **Disable the module from a working boot**:
+1. **KernelSU 安全模式**：开机时按住 **音量下键**。KernelSU 会跳过所有模块启动，手机就能正常进入系统。
+2. **能开机时禁用模块**：
    ```bash
    su -c 'touch /data/adb/modules/adbhide_kmod/disable'
    su -c 'touch /data/adb/modules/adbhide_native/disable'
    ```
-   then reboot.
-3. **Recovery / fastboot** - remove the module directory, or restore the stock
-   `boot` image. This always works, but it needs a PC and the right image.
+   然后重启。
+3. **Recovery / fastboot**：删掉模块目录，或者刷回原厂 `boot` 镜像。这条一定能救，但需要电脑和对应镜像。
 
-If `panic_on_oops` is 1 on your kernel (the default), one oops is enough to
-reboot the phone; repeated boots into the same module can look like a hard brick
-until a module is disabled.
+如果内核的 `panic_on_oops` 是 1（默认值），一次 oops 就足以重启；反复启动进同一个模块，看起来就像彻底变砖，直到模块被禁用为止。
 
-## Known limitations
+## 已知限制
 
-- Wireless debugging discovery is gone on purpose: `_adb` mDNS records are
-  dropped for every listener, so `adb mdns services`, IDE device lists and QR
-  pairing cannot find the phone. Manual `adb pair` / `adb connect` still work.
-- `/sys/module/adbhide_kmod` is visible to any app; the module name is not
-  hidden.
-- The kernel module keeps a snapshot of the target uids; after changing the
-  blacklist, sync from the app (no reboot needed).
-- Only the tested device above is known to work. Treat every other combination
-  as experimental.
+- 无线调试的自动发现按设计不可用：所有监听者都收不到 `_adb` 的 mDNS 记录，所以 `adb mdns services`、IDE 设备列表、扫码配对都找不到手机。手动 `adb pair` / `adb connect` 仍然可用。
+- `/sys/module/adbhide_kmod` 对普通应用可见，模块名没有隐藏。
+- 内核模块保存的是目标 uid 的快照；改完名单后要在应用里同步一次（不需要重启）。
+- 除上面那台测试机外，其他组合都按实验性对待。
 
-## Command-line check
+## 命令行检查
 
 ```bash
-su -c 'cat /proc/adbhide_kmod'                 # module state, counters, target uids
-su -c 'cat /proc/adbhide_uids'                 # live kernel list
+su -c 'cat /proc/adbhide_kmod'                 # 模块状态、计数、目标 uid
+su -c 'cat /proc/adbhide_uids'                 # 内核当前的名单
 su 10361 -c 'getprop persist.sys.usb.config'   # -> mtp
-iptables -S ADBHIDE_PORTS                      # adbd port resets per uid
+iptables -S ADBHIDE_PORTS                      # 每个 uid 的 adbd 端口规则
 ```
 
-## Build
+## 构建
 
-Kernel modules are built in CI with the DDK images
-`ghcr.io/ylarod/ddk-min:android<version>-<kmi>` for seven KMIs (5.10 to 6.12):
+内核模块由 CI 用 DDK 镜像 `ghcr.io/ylarod/ddk-min:android<版本>-<KMI>` 构建，覆盖 5.10 到 6.12 共 7 个 KMI：
 
 ```bash
 make -C kmod strip KERNEL_SRC=/opt/ddk/kdir/android15-6.6
 ```
 
-Zygisk library (NDK r27c):
+Zygisk 库（NDK r27c）：
 
 ```bash
-tools/build-native.sh          # uses $ANDROID_NDK_HOME or D:/Android_SDK/ndk/android-ndk-r27c
+tools/build-native.sh          # 使用 $ANDROID_NDK_HOME 或 D:/Android_SDK/ndk/android-ndk-r27c
 ```
 
-Manager APK (aapt2 -> javac -> d8 -> apksigner, no Gradle):
+管理器 APK（aapt2 → javac → d8 → apksigner，不走 Gradle）：
 
 ```bash
 tools/build-apk.sh
 ```
 
-## License
+## 许可
 
 MIT
