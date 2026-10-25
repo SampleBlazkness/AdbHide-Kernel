@@ -101,7 +101,7 @@ in order:
 3. **Recovery / fastboot** - remove the module directory, or restore the stock
    `boot` image. This always works, but it needs a PC and the right image.
 
-If `panic_on_oops` is 1 on your kernel (the default), one oops is enough to
+If `panic_on_oops` is 1 on your kernel (common on GKI kernels), one oops is enough to
 reboot the phone; repeated boots into the same module can look like a hard brick
 until a module is disabled.
 
