@@ -150,8 +150,11 @@ jobs:
         run: |
           set -eu
           echo "SDK: $ANDROID_HOME"
-          yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses >/dev/null || true
-          sdkmanager --sdk_root="$ANDROID_HOME" "platforms;android-36" "build-tools;36.0.0"
+          SDKM=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | head -1)
+          echo "sdkmanager: $SDKM"
+          test -n "$SDKM"
+          yes | "$SDKM" --sdk_root="$ANDROID_HOME" --licenses >/dev/null || true
+          "$SDKM" --sdk_root="$ANDROID_HOME" "platforms;android-36" "build-tools;36.0.0"
           ls "$ANDROID_HOME/build-tools"
 
       - name: Build APK
