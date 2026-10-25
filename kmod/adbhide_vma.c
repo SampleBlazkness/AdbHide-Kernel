@@ -76,7 +76,7 @@ static void vma_work_fn(struct work_struct *w)
 		struct vm_area_struct *vma = find_vma(mm, vw->addr);
 
 		if (vma && vma->vm_start == vw->addr && vma->vm_file == vw->file) {
-			vm_flags_set(vma, VM_SHARED | VM_MAYSHARE);
+			adbhide_vm_flags_set(vma, VM_SHARED | VM_MAYSHARE);
 			adbhide_event_add("vmaflag", vw->file->f_path.dentry->d_name.name);
 		}
 		mmap_write_unlock(mm);

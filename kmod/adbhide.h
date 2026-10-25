@@ -3,8 +3,28 @@
 #define ADBHIDE_H
 
 #include <linux/types.h>
+#include <linux/version.h>
 #include <linux/cred.h>
 #include <linux/sched.h>
+
+/*
+ * Kernel API compatibility for the KMI range this module is built for
+ * (5.10 .. 6.12). kmap_local_page()/kunmap_local() arrived in 5.11 and
+ * vm_flags_set() in 6.3.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+#define adbhide_kmap_local(page) kmap_local_page(page)
+#define adbhide_kunmap_local(addr) kunmap_local(addr)
+#else
+#define adbhide_kmap_local(page) kmap(page)
+#define adbhide_kunmap_local(addr) kunmap(addr)
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+#define adbhide_vm_flags_set(vma, flags) vm_flags_set(vma, flags)
+#else
+#define adbhide_vm_flags_set(vma, flags) ((vma)->vm_flags |= (flags))
+#endif
 
 #define ADBHIDE_KVER      "1.2.6"
 #define ADBHIDE_MAX_UIDS  64

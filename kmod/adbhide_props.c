@@ -23,6 +23,7 @@
 #include <linux/file.h>
 #include <linux/namei.h>
 #include <linux/mm.h>
+#include <linux/highmem.h>
 #include <linux/pagemap.h>
 #include <linux/slab.h>
 #include <linux/kref.h>
@@ -204,10 +205,10 @@ static ssize_t read_prop_file(struct file *f, u8 *dst, size_t cap)
 		if (!pg) {
 			memset(dst + done, 0, n);
 		} else {
-			void *k = kmap_local_page(pg);
+			void *k = adbhide_kmap_local(pg);
 
 			memcpy(dst + done, k, n);
-			kunmap_local(k);
+			adbhide_kunmap_local(k);
 			put_page(pg);
 		}
 		done += n;
@@ -329,9 +330,9 @@ static vm_fault_t ab_fault(struct vm_fault *vmf)
 
 	if (off < b->len) {
 		n = min_t(size_t, PAGE_SIZE, b->len - off);
-		kaddr = kmap_local_page(page);
+		kaddr = adbhide_kmap_local(page);
 		memcpy(kaddr, b->data + off, n);
-		kunmap_local(kaddr);
+		adbhide_kunmap_local(kaddr);
 	}
 	vmf->page = page;
 	return 0;
@@ -374,7 +375,7 @@ static int ab_mmap(struct file *file, struct vm_area_struct *vma)
 
 	vma->vm_private_data = b;
 	vma->vm_ops = &ab_vm_ops;
-	vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
+	adbhide_vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
 	return 0;
 }
 
