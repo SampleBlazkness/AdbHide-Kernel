@@ -20,7 +20,8 @@
 #define adbhide_kunmap_local(addr) kunmap(addr)
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 3, 0)
+/* Android 6.1 GKI backports the const vm_flags API together with vm_flags_set(). */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
 #define adbhide_vm_flags_set(vma, flags) vm_flags_set(vma, flags)
 #else
 #define adbhide_vm_flags_set(vma, flags) ((vma)->vm_flags |= (flags))
