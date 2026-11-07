@@ -17,5 +17,3 @@ mkdir -p /data/adb/adbhide
 } >>"$LOG"
 
 sh "$MODDIR/sync.sh"
-
-sh "$MODDIR/guard.sh" &
