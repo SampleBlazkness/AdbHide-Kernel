@@ -28,6 +28,82 @@ public class MainHook implements IXposedHookLoadPackage {
 
     private static final String TAG = "AdbHide";
     static final String PROBE_KEY = "adbhide_hook_probe";
+    private static final String PROPS_FILE = "/data/system/adbhide.props";
+    private static final long PROPS_TTL_MS = 2000L;
+    private static long propsReadAt = 0L;
+    private static boolean pMaster = true;
+    private static boolean pDev = true;
+    private static boolean pAdb = true;
+    private static boolean pWifi = true;
+    private static long pExpires = 0L;
+
+    private static void loadProps() {
+        long now = System.currentTimeMillis();
+        if (now - propsReadAt < PROPS_TTL_MS) {
+            return;
+        }
+        propsReadAt = now;
+        try {
+            java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.FileReader(PROPS_FILE));
+            boolean master = true, dev = true, adb = true, wifi = true;
+            long expires = 0L;
+            String line;
+            while ((line = r.readLine()) != null) {
+                int eq = line.indexOf('=');
+                if (eq <= 0) {
+                    continue;
+                }
+                String k = line.substring(0, eq).trim();
+                String v = line.substring(eq + 1).trim();
+                if ("master".equals(k)) {
+                    master = "1".equals(v);
+                } else if ("dev".equals(k)) {
+                    dev = "1".equals(v);
+                } else if ("adb".equals(k)) {
+                    adb = "1".equals(v);
+                } else if ("wifi".equals(k)) {
+                    wifi = "1".equals(v);
+                } else if ("expires".equals(k)) {
+                    try {
+                        expires = Long.parseLong(v);
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+            r.close();
+            pMaster = master;
+            pDev = dev;
+            pAdb = adb;
+            pWifi = wifi;
+            pExpires = expires;
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static boolean masterOn() {
+        loadProps();
+        if (!pMaster) {
+            return false;
+        }
+        return pExpires <= 0L || System.currentTimeMillis() < pExpires;
+    }
+
+    private static boolean spoofEnabled(String key) {
+        if (!masterOn()) {
+            return false;
+        }
+        if ("development_settings_enabled".equals(key)) {
+            return pDev;
+        }
+        if ("adb_enabled".equals(key)) {
+            return pAdb;
+        }
+        if ("adb_wifi_enabled".equals(key)) {
+            return pWifi;
+        }
+        return true;
+    }
     private static final String SYSTEM_PKG = "android";
     private static final String SETTINGS_PKG = "com.android.providers.settings";
     private static final String SPOOF_VALUE = "0";
@@ -119,6 +195,9 @@ public class MainHook implements IXposedHookLoadPackage {
                     if (!isSpoofedKey((String) keyArg)) {
                         return;
                     }
+                    if (!spoofEnabled((String) keyArg)) {
+                        return;
+                    }
                     // system / root / shell keep seeing the real value: adb
                     // debugging itself must not be broken by this module
                     if (Binder.getCallingUid() < 10000) {
@@ -148,6 +227,9 @@ public class MainHook implements IXposedHookLoadPackage {
         XposedBridge.hookAllMethods(props, "get", new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
+                if (!masterOn()) {
+                    return;
+                }
                 String key = firstString(param);
                 if (key == null) {
                     return;
@@ -162,6 +244,9 @@ public class MainHook implements IXposedHookLoadPackage {
         XC_MethodHook intHook = new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
+                if (!masterOn()) {
+                    return;
+                }
                 String key = firstString(param);
                 if (key == null) {
                     return;
@@ -180,6 +265,9 @@ public class MainHook implements IXposedHookLoadPackage {
         XposedBridge.hookAllMethods(props, "getBoolean", new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
+                if (!masterOn()) {
+                    return;
+                }
                 String key = firstString(param);
                 if (key == null) {
                     return;
