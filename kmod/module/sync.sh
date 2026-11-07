@@ -35,6 +35,17 @@ else
     echo "$(date) sync: no blacklist.conf" >>"$LOG"
 fi
 
+# The kernel layer is subordinate to the LSPosed layer: it only hides while the
+# hook is alive for this boot. MainHook writes boot_id into this file.
+BOOT_ID=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d ' 
+')
+HOOK_ID=$(cat /data/system/adbhide.hook 2>/dev/null | tr -d ' 
+')
+if [ -z "$BOOT_ID" ] || [ "$BOOT_ID" != "$HOOK_ID" ]; then
+    LIST=""
+    echo "$(date) sync: lsposed layer inactive, kernel list cleared" >>"$LOG"
+fi
+
 TMP="$UIDS.tmp"
 printf '%s\n' "$LIST" | tr ',' '\n' | sed '/^$/d' >"$TMP"
 chown root:root "$TMP" 2>/dev/null
