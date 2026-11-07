@@ -493,26 +493,11 @@ public class MainActivity extends Activity {
     }
 
     private void saveProps(String key, String value) {
-        String script = "f=/data/system/adbhide.props
-"
-                + "touch $f
-"
-                + "if grep -q '^" + key + "=' $f; then
-"
-                + "  sed -i 's/^" + key + "=.*/" + key + "=" + value + "/' $f
-"
-                + "else
-"
-                + "  echo '" + key + "=" + value + "' >> $f
-"
-                + "fi
-"
-                + "chmod 644 $f
-"
-                + "cp $f /data/adb/adbhide/props.conf
-"
-                + "chmod 644 /data/adb/adbhide/props.conf
-";
+        String script = "f=/data/system/adbhide.props; touch $f; "
+                + "grep -q '^" + key + "=' $f && "
+                + "sed -i 's/^" + key + "=.*/" + key + "=" + value + "/' $f || "
+                + "echo '" + key + "=" + value + "' >> $f; "
+                + "chmod 644 $f; cp $f /data/adb/adbhide/props.conf";
         try {
             Runtime.getRuntime().exec(new String[]{"su", "-c", script}).waitFor();
         } catch (Throwable ignored) {
