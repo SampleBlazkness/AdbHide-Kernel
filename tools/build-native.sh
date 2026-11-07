@@ -37,6 +37,8 @@ echo "[1/2] compile $TARGET"
   "$ROOT/native/adbhide_native.cpp" \
   -o "$OUT/zygisk/$TARGET.so" \
   -llog
+STRIP="$NDK/toolchains/llvm/prebuilt/$HOST/bin/llvm-strip$EXE"
+[ -f "$STRIP" ] && "$STRIP" --strip-unneeded "$OUT/zygisk/$TARGET.so"
 ls -l "$OUT/zygisk/$TARGET.so"
 
 echo "[2/2] package"
