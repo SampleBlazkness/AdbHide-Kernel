@@ -41,7 +41,9 @@ BOOT_ID=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '
 ')
 HOOK_ID=$(cat /data/system/adbhide.hook 2>/dev/null | tr -d ' 
 ')
-if [ -z "$BOOT_ID" ] || [ "$BOOT_ID" != "$HOOK_ID" ]; then
+APP_OK=0
+[ -d /data/data/com.blazkness.adbhide ] && APP_OK=1
+if [ "$APP_OK" = 0 ] || [ -z "$BOOT_ID" ] || [ "$BOOT_ID" != "$HOOK_ID" ]; then
     LIST=""
     echo "$(date) sync: lsposed layer inactive, kernel list cleared" >>"$LOG"
 fi
