@@ -3,12 +3,15 @@ package com.blazkness.adbhide;
 import android.app.Activity;
 import android.graphics.Typeface;
 import android.os.Build;
+import android.content.Intent;
 import android.os.Bundle;
 import java.io.FileInputStream;
 import android.os.Looper;
 import android.os.Handler;
 import android.util.Log;
 import android.provider.Settings;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import android.content.res.ColorStateList;
 import android.view.Gravity;
 import android.view.View;
@@ -64,6 +67,7 @@ public class MainActivity extends Activity {
     private TextView hint;
     private TextView tvSysState;
     private TextView tvReads;
+    private TextView tvUpdate;
     private LinearLayout bannerBox;
 
     private final java.util.Map<String, String> pending = new java.util.HashMap<String, String>();
@@ -238,9 +242,20 @@ public class MainActivity extends Activity {
         title.setIncludeFontPadding(false);
         title.setPadding(0, 0, 0, dp(4));
         head.addView(title);
-        TextView headSub = Ui.sub(this, "系统属性层 + 内核层，两层各自独立");
+        TextView headSub = Ui.sub(this, "github.com/SampleBlazkness/AdbHide-Kernel");
         headSub.setIncludeFontPadding(false);
         headSub.setPadding(0, 0, 0, 0);
+        headSub.setTextColor(Ui.ACCENT);
+        headSub.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW,
+                            android.net.Uri.parse("https://github.com/SampleBlazkness/AdbHide-Kernel")));
+                } catch (Throwable ignored) {
+                }
+            }
+        });
         head.addView(headSub);
         body.addView(head);
 
@@ -373,6 +388,24 @@ public class MainActivity extends Activity {
         tvKernel = addModuleRow(card, "内核模块");
         tvNative = addModuleRow(card, "Native 模块");
         tvApp = addModuleRow(card, "管理器");
+        LinearLayout upd = new LinearLayout(this);
+        upd.setOrientation(LinearLayout.HORIZONTAL);
+        upd.setGravity(Gravity.CENTER_VERTICAL);
+        upd.setPadding(0, dp(10), 0, 0);
+        tvUpdate = Ui.sub(this, "未检查更新");
+        upd.addView(tvUpdate, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView check = Ui.text(this, "检查更新", 13, Ui.ACCENT);
+        check.setPadding(dp(10), dp(6), dp(2), dp(6));
+        check.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                checkUpdates();
+            }
+        });
+        upd.addView(check);
+        card.addView(upd);
+
         return card;
     }
 
@@ -684,6 +717,136 @@ public class MainActivity extends Activity {
             Runtime.getRuntime().exec(new String[]{"su", "-c", sb.toString()}).waitFor();
         } catch (Throwable ignored) {
         }
+    }
+
+    private String appVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
+    private String moduleVersion(String path) {
+        Process p = null;
+        try {
+            p = Runtime.getRuntime().exec(new String[]{"su", "-c", "sed -n 's/^version=//p' " + path});
+            BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            String line = r.readLine();
+            r.close();
+            p.waitFor();
+            return line == null ? "" : line.trim().replace("v", "");
+        } catch (Throwable t) {
+            return "";
+        } finally {
+            if (p != null) {
+                p.destroy();
+            }
+        }
+    }
+
+    private String httpGet(String url) throws Exception {
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        c.setConnectTimeout(8000);
+        c.setReadTimeout(8000);
+        c.setRequestProperty("Accept", "application/vnd.github+json");
+        StringBuilder sb = new StringBuilder();
+        BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream()));
+        String line;
+        while ((line = r.readLine()) != null) {
+            sb.append(line);
+        }
+        r.close();
+        c.disconnect();
+        return sb.toString();
+    }
+
+    private String between(String s, String a, String b) {
+        int i = s.indexOf(a);
+        if (i < 0) {
+            return "";
+        }
+        i += a.length();
+        int j = s.indexOf(b, i);
+        return j < 0 ? "" : s.substring(i, j);
+    }
+
+    private boolean isNewer(String latest, String current) {
+        if (latest == null || latest.isEmpty() || current == null || current.isEmpty()) {
+            return false;
+        }
+        String[] a = latest.split("[.]");
+        String[] b = current.split("[.]");
+        for (int i = 0; i < Math.max(a.length, b.length); i++) {
+            int x = i < a.length ? num(a[i]) : 0;
+            int y = i < b.length ? num(b[i]) : 0;
+            if (x != y) {
+                return x > y;
+            }
+        }
+        return false;
+    }
+
+    private void checkUpdates() {
+        if (tvUpdate == null) {
+            return;
+        }
+        tvUpdate.setText("检查中…");
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String out;
+                try {
+                    String appVer = appVersion();
+                    String kVer = moduleVersion("/data/adb/modules/adbhide_kmod/module.prop");
+                    String nVer = moduleVersion("/data/adb/modules/adbhide_native/module.prop");
+                    JSONObject o = new JSONObject(httpGet(
+                            "https://api.github.com/repos/SampleBlazkness/AdbHide-Kernel/releases/latest"));
+                    String tag = o.optString("tag_name", "").replace("v", "");
+                    String kLatest = "";
+                    String nLatest = "";
+                    JSONArray assets = o.optJSONArray("assets");
+                    if (assets != null) {
+                        for (int i = 0; i < assets.length(); i++) {
+                            String n = assets.getJSONObject(i).optString("name", "");
+                            if (n.contains("kmod-v")) {
+                                kLatest = between(n, "kmod-v", ".zip");
+                            }
+                            if (n.contains("native-v")) {
+                                nLatest = between(n, "native-v", ".zip");
+                            }
+                        }
+                    }
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("应用 ").append(appVer)
+                      .append(isNewer(tag, appVer) ? " → " + tag : " 已最新");
+                    if (kVer.isEmpty()) {
+                        sb.append(" · 内核 未安装");
+                    } else {
+                        sb.append(" · 内核 ").append(kVer)
+                          .append(isNewer(kLatest, kVer) ? " → " + kLatest : " 已最新");
+                    }
+                    if (nVer.isEmpty()) {
+                        sb.append(" · Zygisk 未安装");
+                    } else {
+                        sb.append(" · Zygisk ").append(nVer)
+                          .append(isNewer(nLatest, nVer) ? " → " + nLatest : " 已最新");
+                    }
+                    out = sb.toString();
+                } catch (Throwable t) {
+                    out = "检查失败，请检查网络";
+                }
+                final String text = out;
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (tvUpdate != null) {
+                            tvUpdate.setText(text);
+                        }
+                    }
+                });
+            }
+        }).start();
     }
 
     private State readState() {
