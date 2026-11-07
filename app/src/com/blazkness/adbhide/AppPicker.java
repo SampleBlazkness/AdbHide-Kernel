@@ -188,7 +188,11 @@ final class AppPicker {
         Set<String> selected = readList();
         List<Entry> out = new ArrayList<Entry>();
         List<ApplicationInfo> apps = pm.getInstalledApplications(0);
+        String self = activity.getPackageName();
         for (ApplicationInfo ai : apps) {
+            if (self.equals(ai.packageName)) {
+                continue;
+            }
             Entry e = new Entry();
             e.pkg = ai.packageName;
             e.label = String.valueOf(pm.getApplicationLabel(ai));
@@ -241,7 +245,11 @@ final class AppPicker {
         StringBuilder body = new StringBuilder("mkdir -p /data/adb/adbhide\n");
         body.append("f=/data/adb/adbhide/blacklist.conf\n");
         body.append(": > $f\n");
+        String selfPkg = activity.getPackageName();
         for (String pkg : selected) {
+            if (selfPkg.equals(pkg)) {
+                continue;
+            }
             body.append("echo '").append(pkg).append("' >> $f\n");
         }
         body.append("chmod 600 $f\n");

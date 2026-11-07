@@ -242,6 +242,18 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT));
         setContentView(scroll);
 
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Runtime.getRuntime().exec(new String[]{"su", "-c",
+                            "cmd appops set " + getPackageName() + " 10022 allow"}).waitFor();
+                } catch (Throwable ignored) {
+                }
+            }
+        }).start();
+
+
         LinearLayout head = new LinearLayout(this);
         head.setOrientation(LinearLayout.VERTICAL);
         head.setPadding(0, 0, 0, dp(18));
