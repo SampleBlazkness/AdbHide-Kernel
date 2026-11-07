@@ -36,16 +36,30 @@ final class AppPicker {
         String pkg;
         String label;
         Drawable icon;
+        boolean system;
         boolean checked;
     }
 
     static void show(final Activity activity, final Runnable onDone) {
-        final List<Entry> entries = load(activity);
+        final List<Entry> all = load(activity);
+        final List<Entry> entries = new ArrayList<Entry>();
+        for (Entry e : all) {
+            if (!e.system) {
+                entries.add(e);
+            }
+        }
         final Dialog dialog = new Dialog(activity);
         dialog.setTitle("选择要隐藏的应用");
 
         LinearLayout root = new LinearLayout(activity);
         root.setOrientation(LinearLayout.VERTICAL);
+
+        final CheckBox showSystem = new CheckBox(activity);
+        showSystem.setText("显示系统应用");
+        showSystem.setChecked(false);
+        showSystem.setPadding(Ui.dp(activity, 16), Ui.dp(activity, 10),
+                Ui.dp(activity, 16), Ui.dp(activity, 4));
+        root.addView(showSystem);
 
         ListView list = new ListView(activity);
         list.setAdapter(new BaseAdapter() {
@@ -109,6 +123,19 @@ final class AppPicker {
         root.addView(list, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
+        showSystem.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                entries.clear();
+                for (Entry e : all) {
+                    if (showSystem.isChecked() || !e.system) {
+                        entries.add(e);
+                    }
+                }
+                list.setAdapter(list.getAdapter());
+            }
+        });
+
         LinearLayout actions = new LinearLayout(activity);
         actions.setPadding(Ui.dp(activity, 16), Ui.dp(activity, 10),
                 Ui.dp(activity, 16), Ui.dp(activity, 14));
@@ -118,7 +145,7 @@ final class AppPicker {
             @Override
             public void onClick(View v) {
                 Set<String> selected = new HashSet<String>();
-                for (Entry e : entries) {
+                for (Entry e : all) {
                     if (e.checked) {
                         selected.add(e.pkg);
                     }
@@ -165,6 +192,7 @@ final class AppPicker {
             Entry e = new Entry();
             e.pkg = ai.packageName;
             e.label = String.valueOf(pm.getApplicationLabel(ai));
+            e.system = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
             try {
                 e.icon = pm.getApplicationIcon(ai);
             } catch (Throwable ignored) {

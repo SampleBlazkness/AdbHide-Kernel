@@ -122,6 +122,7 @@ public class MainHook implements IXposedHookLoadPackage {
         });
 
         XposedBridge.log(TAG + ": SettingsProvider.call hooks installed");
+        writeHookMark();
     }
 
     private void hookSystemProperties(XC_LoadPackage.LoadPackageParam lp) {
@@ -227,5 +228,27 @@ public class MainHook implements IXposedHookLoadPackage {
         }
         Object a = param.args[0];
         return (a instanceof String) ? (String) a : null;
+    }
+
+    private void writeHookMark() {
+        try {
+            String bootId = readBootId();
+            java.io.FileOutputStream out = new java.io.FileOutputStream("/data/system/adbhide.hook", false);
+            out.write(bootId.getBytes("UTF-8"));
+            out.close();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private String readBootId() {
+        try {
+            java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.FileReader("/proc/sys/kernel/random/boot_id"));
+            String line = r.readLine();
+            r.close();
+            return line == null ? "" : line.trim();
+        } catch (Throwable t) {
+            return "";
+        }
     }
 }
