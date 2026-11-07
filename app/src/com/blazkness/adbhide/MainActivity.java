@@ -440,7 +440,11 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 if (!loadProps()) {
-                    saveProps();
+                    saveProps("master", "1");
+                    saveProps("dev", "1");
+                    saveProps("adb", "1");
+                    saveProps("wifi", "1");
+                    saveProps("expires", "0");
                 }
                 final State st = readState();
                 runOnUiThread(new Runnable() {
