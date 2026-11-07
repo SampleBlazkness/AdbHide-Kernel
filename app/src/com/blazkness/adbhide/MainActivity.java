@@ -280,7 +280,7 @@ public class MainActivity extends Activity {
         head.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
-        titles.addView(Ui.title(this, "应用隐藏"));
+        titles.addView(Ui.title(this, "内核隐藏"));
         tvListSummary = Ui.sub(this, "读取中…");
         titles.addView(tvListSummary);
         head.addView(titles, new LinearLayout.LayoutParams(0,
