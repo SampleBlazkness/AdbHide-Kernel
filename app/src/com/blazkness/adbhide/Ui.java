@@ -3,6 +3,7 @@ package com.blazkness.adbhide;
 import android.content.Context;
 import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -97,6 +98,26 @@ final class Ui {
         t.setBackground(primary
                 ? bg(ACCENT, 12, c)
                 : bg(CARD, 12, 0xFFD7DBE2, c));
+        t.setClickable(true);
+        t.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        v.animate().alpha(0.65f).scaleX(0.97f).scaleY(0.97f)
+                                .setDuration(70).start();
+                        break;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        v.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                                .setDuration(120).start();
+                        break;
+                    default:
+                        break;
+                }
+                return false;
+            }
+        });
         return t;
     }
 }
