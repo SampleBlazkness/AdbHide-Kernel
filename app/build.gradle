@@ -28,7 +28,19 @@ android {
         }
     }
 
+    signingConfigs {
+        ci {
+            storeFile file("../ci/adbhide-ci.jks")
+            storePassword "adbhide"
+            keyAlias "adbhide"
+            keyPassword "adbhide"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig signingConfigs.ci
+        }
         release {
             minifyEnabled false
         }
