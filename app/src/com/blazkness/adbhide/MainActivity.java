@@ -60,6 +60,7 @@ public class MainActivity extends Activity {
     private LinearLayout body;
     private TextView hint;
     private TextView tvSysState;
+    private TextView tvReads;
     private TextView tvListSummary;
     private TextView tvMissingTitle;
     private LinearLayout listBox;
@@ -151,6 +152,10 @@ public class MainActivity extends Activity {
 
         swWifi = newSwitch("wifi");
         card.addView(row("无线调试", "adb_wifi_enabled", swWifi));
+
+        tvReads = Ui.sub(this, "");
+        tvReads.setPadding(0, dp(10), 0, 0);
+        card.addView(tvReads);
 
         return card;
     }
@@ -400,6 +405,17 @@ public class MainActivity extends Activity {
         applyEnabledState(swMaster.isChecked());
 
         tvSysState.setText(st.sysActive ? "已生效" : "未生效");
+        if (tvReads != null) {
+            try {
+                int a = Settings.Global.getInt(getContentResolver(), "adb_enabled", -1);
+                int d = Settings.Global.getInt(getContentResolver(),
+                        "development_settings_enabled", -1);
+                int w = Settings.Global.getInt(getContentResolver(), "adb_wifi_enabled", -1);
+                tvReads.setText("本应用读到的值：adb=" + a + " dev=" + d + " wifi=" + w);
+            } catch (Throwable t) {
+                tvReads.setText("读取失败");
+            }
+        }
         tvSysState.setTextColor(st.sysActive ? Ui.OK : Ui.BAD);
         tvSysState.setBackground(Ui.bg(st.sysActive ? 0xFFE9F7EF : 0xFFFDECEC, 999, this));
 
