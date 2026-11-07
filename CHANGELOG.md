@@ -1,5 +1,28 @@
 # 更新日志
 
+## v1.4.0 — 2026-11-07
+
+### 管理器
+
+- 重写了 UI，优化了模块状态判断，添加了应用内作用域调整，添加了应用内更新检查
+- 新增英文语言
+
+### 内核模块
+
+- 名单同步增加前置条件：管理器必须已安装，且本次开机的 LSPosed 层注入成功，否则清空内核名单
+
+### Zygisk 模块
+
+- 构建时 strip：`.so` 由 1.7 MB 降到 263 KB，模块 zip 由 409 KB 降到 88 KB
+
+### 签名
+
+- 由于不小心泄露了签名，因此更换签名密钥（SHA-256 `3920ed6f…`）。与 1.3.1 不兼容，
+  升级前必须卸载旧版本，LSPosed 作用域和 KernelSU 授权需要重新设置
+- APK 改由 GitHub Actions 构建（本地构建由于未知问题无法被 LSPosed 识别）
+
+---
+
 ## v1.3.1 — 2026-10-25
 
 首个带完整构建产物的版本。
@@ -28,6 +51,28 @@
 ---
 
 # Changelog
+
+## v1.4.0 — 2026-11-07
+
+### Manager
+
+- Rewrote the UI, improved module state detection, added in-app scope selection and an in-app update check
+- Added English
+
+### Kernel module
+
+- List sync now requires the manager to be installed and the LSPosed layer to have been injected this boot; otherwise the kernel list is cleared
+
+### Zygisk module
+
+- The build strips the binary: `.so` 1.7 MB → 263 KB, module zip 409 KB → 88 KB
+
+### Signing
+
+- Signing key replaced after the previous one was leaked by mistake (SHA-256 `3920ed6f…`). Not compatible with 1.3.1: uninstall before installing; LSPosed scope and KernelSU grants must be set again
+- The APK is now built by GitHub Actions (local builds were not recognised by LSPosed)
+
+---
 
 ## v1.3.1 — 2026-10-25
 
