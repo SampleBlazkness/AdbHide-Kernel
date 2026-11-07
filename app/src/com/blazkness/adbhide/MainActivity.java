@@ -45,21 +45,7 @@ public class MainActivity extends Activity {
             "fi\n" +
             "echo NATIVE=$([ -f /data/adb/modules/adbhide_native/zygisk/arm64-v8a.so ] && echo 1 || echo 0)\n" +
             "echo NATIVEVER=$(sed -n 's/^version=//p' /data/adb/modules/adbhide_native/module.prop 2>/dev/null)\n" +
-            "echo UIDS=$(tr '\\n' ' ' < /data/adb/adbhide/uids.txt 2>/dev/null)\\n" +
-            "PM=$(pm list packages -U 2>/dev/null)\\n" +
-            "T=0; R=0; S=''\\n" +
-            "while IFS= read -r p; do\\n" +
-            "  p=$(echo \"$p\" | tr -d '\\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')\\n" +
-            "  [ -z \"$p\" ] && continue\\n" +
-            "  case \"$p\" in \\#*) continue;; esac\\n" +
-            "  T=$((T+1))\\n" +
-            "  u=$(echo \"$PM\" | sed -n \"s/^package:$p uid:\\\\([0-9]*\\\\)$/\\1/p\" | head -n1)\\n" +
-            "  if [ -z \"$u\" ]; then S=\"$S $p\"; else RU=\"$RU $u\"; fi\\n" +
-            "done < /data/adb/adbhide/blacklist.conf 2>/dev/null\\n" +
-            "R=$(echo $RU | tr ' ' '\\n' | sort -u | grep -c .)\\n" +
-            "echo CONF_TOTAL=$T\\n" +
-            "echo CONF_RESOLVED=$R\\n" +
-            "echo CONF_SKIPPED=$S\\n" +
+            "echo UIDS=$(tr '\\n' ' ' < /data/adb/adbhide/uids.txt 2>/dev/null)\n" +
             "echo PORTS=$(iptables -S ADBHIDE_PORTS 2>/dev/null | grep -c uid-owner)\n" +
             "echo PORTS6=$(ip6tables -S ADBHIDE_PORTS 2>/dev/null | grep -c uid-owner)\n" +
             "echo MDNS=$(iptables -S ADBHIDE_MDNS_G 2>/dev/null | grep -c string)\n" +
@@ -186,6 +172,35 @@ public class MainActivity extends Activity {
         }
     }
 
+    private String[] confStats() {
+        int total = 0;
+        java.util.LinkedHashSet<Integer> uids = new java.util.LinkedHashSet<>();
+        StringBuilder skipped = new StringBuilder();
+        Process proc = null;
+        try {
+            proc = Runtime.getRuntime().exec(new String[]{"su", "-c", "cat /data/adb/adbhide/blacklist.conf"});
+            BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+            String line;
+            while ((line = r.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith("#")) continue;
+                total++;
+                try {
+                    uids.add(getPackageManager().getPackageUid(line, 0));
+                } catch (Throwable t) {
+                    if (skipped.length() > 0) skipped.append(", ");
+                    skipped.append(line);
+                }
+            }
+            r.close();
+            proc.waitFor();
+        } catch (Throwable ignored) {
+        } finally {
+            if (proc != null) proc.destroy();
+        }
+        return new String[]{String.valueOf(total), String.valueOf(uids.size()), skipped.toString()};
+    }
+
     private void refresh() {
         status.setText(readState());
         Linkify.addLinks(status, Pattern.compile("github\\.com/\\S+"), "https://");
@@ -248,9 +263,10 @@ public class MainActivity extends Activity {
         sb.append("名单\n");
         sb.append("  /data/adb/adbhide/blacklist.conf\n");
         sb.append("  一行一个包名,改完点「同步名单」,不用重启\n");
-        int confTotal = num(v.get("CONF_TOTAL"));
-        int confResolved = num(v.get("CONF_RESOLVED"));
-        String confSkipped = nz(v.get("CONF_SKIPPED")).trim();
+        String[] confStats = confStats();
+        int confTotal = Integer.parseInt(confStats[0]);
+        int confResolved = Integer.parseInt(confStats[1]);
+        String confSkipped = confStats[2];
         int confSkippedCount = confSkipped.isEmpty() ? 0 : confSkipped.split("\\s+").length;
         sb.append("  文件 ").append(confTotal).append(" 行,生效 ").append(confResolved);
         if (confSkippedCount > 0) {
