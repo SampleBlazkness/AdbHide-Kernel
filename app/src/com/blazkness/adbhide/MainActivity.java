@@ -551,7 +551,7 @@ public class MainActivity extends Activity {
         int ports = num(v.get("PORTS"));
         int ports6 = num(v.get("PORTS6"));
         int mdns = num(v.get("MDNS")) + num(v.get("MDNS6"));
-        st.sysActive = st.kmodOk && mdns >= 2 && ports >= st.uids.size() * 2
+        st.sysActive = hookAlive()
                 && ports6 >= st.uids.size() * 2;
 
         try {
@@ -625,5 +625,37 @@ public class MainActivity extends Activity {
         final List<String> uids = new ArrayList<String>();
         final List<String> pkgs = new ArrayList<String>();
         List<String> missing = new ArrayList<String>();
+    }
+
+    private boolean hookAlive() {
+        String bootId = readFile("/proc/sys/kernel/random/boot_id").trim();
+        if (bootId.isEmpty()) {
+            return false;
+        }
+        return bootId.equals(readFile("/data/system/adbhide.hook").trim());
+    }
+
+    private String readFile(String path) {
+        Process p = null;
+        try {
+            p = Runtime.getRuntime().exec(new String[]{"su", "-c", "cat " + path});
+            java.io.BufferedReader r = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(p.getInputStream()));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = r.readLine()) != null) {
+                sb.append(line).append('
+');
+            }
+            r.close();
+            p.waitFor();
+            return sb.toString();
+        } catch (Throwable t) {
+            return "";
+        } finally {
+            if (p != null) {
+                p.destroy();
+            }
+        }
     }
 }
