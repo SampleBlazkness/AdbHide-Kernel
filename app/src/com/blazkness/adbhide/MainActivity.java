@@ -4,6 +4,9 @@ import android.app.Activity;
 import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Bundle;
+import java.io.FileInputStream;
+import android.os.Looper;
+import android.os.Handler;
 import android.util.Log;
 import android.provider.Settings;
 import android.content.res.ColorStateList;
@@ -61,6 +64,88 @@ public class MainActivity extends Activity {
     private TextView hint;
     private TextView tvSysState;
     private TextView tvReads;
+
+    private final Handler ticker = new Handler(Looper.getMainLooper());
+    private final Runnable tick = new Runnable() {
+        @Override
+        public void run() {
+            updateLive();
+            ticker.postDelayed(this, 1000);
+        }
+    };
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        ticker.removeCallbacks(tick);
+        ticker.post(tick);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        ticker.removeCallbacks(tick);
+    }
+
+    private String callGlobal(String key) {
+        try {
+            Bundle b = getContentResolver().call(Settings.Global.CONTENT_URI,
+                    "GET_global", key, null);
+            return b == null ? null : b.getString("value");
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private void updateLive() {
+        java.util.Map<String, String> fresh = readPropsFile();
+        if (!fresh.isEmpty()) {
+            props.clear();
+            props.putAll(fresh);
+        }
+        binding = true;
+        swMaster.setChecked(!"0".equals(props.get("master")));
+        swDev.setChecked(!"0".equals(props.get("dev")));
+        swAdb.setChecked(!"0".equals(props.get("adb")));
+        swWifi.setChecked(!"0".equals(props.get("wifi")));
+        binding = false;
+        applyEnabledState(swMaster.isChecked());
+
+        boolean alive = "1".equals(callGlobal("adbhide_hook_probe"));
+        tvSysState.setText(alive ? "已生效" : "未生效");
+        tvSysState.setTextColor(alive ? Ui.OK : Ui.BAD);
+        tvSysState.setBackground(Ui.bg(alive ? 0xFFE9F7EF : 0xFFFDECEC, 999, this));
+        if (tvReads != null) {
+            tvReads.setText("本应用读到的值：adb=" + callGlobal("adb_enabled")
+                    + " dev=" + callGlobal("development_settings_enabled")
+                    + " wifi=" + callGlobal("adb_wifi_enabled"));
+        }
+    }
+
+    private java.util.Map<String, String> readPropsFile() {
+        java.util.Map<String, String> out = new java.util.LinkedHashMap<String, String>();
+        FileInputStream in = null;
+        try {
+            in = new FileInputStream("/data/system/adbhide.props");
+            BufferedReader r = new BufferedReader(new InputStreamReader(in));
+            String line;
+            while ((line = r.readLine()) != null) {
+                int eq = line.indexOf('=');
+                if (eq > 0) {
+                    out.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
+                }
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            if (in != null) {
+                try {
+                    in.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        return out;
+    }
     private TextView tvListSummary;
     private TextView tvMissingTitle;
     private LinearLayout listBox;
@@ -109,8 +194,13 @@ public class MainActivity extends Activity {
         head.setPadding(0, 0, 0, dp(18));
         TextView title = Ui.text(this, "AdbHide", 24, Ui.INK);
         title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setIncludeFontPadding(false);
+        title.setPadding(0, 0, 0, dp(4));
         head.addView(title);
-        head.addView(Ui.sub(this, "系统属性层 + 内核层，两层各自独立"));
+        TextView headSub = Ui.sub(this, "系统属性层 + 内核层，两层各自独立");
+        headSub.setIncludeFontPadding(false);
+        headSub.setPadding(0, 0, 0, 0);
+        head.addView(headSub);
         body.addView(head);
 
         body.addView(systemCard());
