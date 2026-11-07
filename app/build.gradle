@@ -30,21 +30,23 @@ android {
     }
 
     signingConfigs {
-        ci {
-            storeFile file("../ci/adbhide-ci.jks")
-            storePassword "adbhide"
-            keyAlias "adbhide"
-            keyPassword "adbhide"
+        releaseKey {
+            def propFile = new File(System.getProperty("user.home"), ".android/adbhide-release.properties")
+            if (propFile.exists()) {
+                def props = new Properties()
+                propFile.withInputStream { props.load(it) }
+                storeFile file(props['storeFile'])
+                storePassword props['storePassword']
+                keyAlias props['keyAlias']
+                keyPassword props['keyPassword']
+            }
         }
     }
 
     buildTypes {
-        debug {
-            signingConfig signingConfigs.ci
-        }
         release {
             minifyEnabled false
-            signingConfig signingConfigs.ci
+            signingConfig signingConfigs.releaseKey
         }
     }
 }
