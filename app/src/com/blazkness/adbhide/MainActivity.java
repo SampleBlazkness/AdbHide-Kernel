@@ -68,6 +68,7 @@ public class MainActivity extends Activity {
     private TextView tvSysState;
     private TextView tvReads;
     private TextView tvUpdate;
+    private String updateText = "未检查更新";
     private LinearLayout bannerBox;
 
     private final java.util.Map<String, String> pending = new java.util.HashMap<String, String>();
@@ -87,6 +88,9 @@ public class MainActivity extends Activity {
         super.onStart();
         ticker.removeCallbacks(tick);
         ticker.post(tick);
+        if ("未检查更新".equals(updateText)) {
+            checkUpdates();
+        }
     }
 
     @Override
@@ -160,6 +164,9 @@ public class MainActivity extends Activity {
         tvSysState.setText(alive ? "已生效" : "未生效");
         tvSysState.setTextColor(alive ? Ui.OK : Ui.BAD);
         tvSysState.setBackground(Ui.bg(alive ? 0xFFE9F7EF : 0xFFFDECEC, 999, this));
+        if (tvUpdate != null) {
+            tvUpdate.setText(updateText);
+        }
         if (tvReads != null) {
             tvReads.setText("本应用读到的值：adb=" + callGlobal("adb_enabled")
                     + " dev=" + callGlobal("development_settings_enabled")
@@ -258,6 +265,24 @@ public class MainActivity extends Activity {
         });
         head.addView(headSub);
         body.addView(head);
+
+        LinearLayout updRow = new LinearLayout(this);
+        updRow.setOrientation(LinearLayout.HORIZONTAL);
+        updRow.setGravity(Gravity.CENTER_VERTICAL);
+        updRow.setPadding(0, dp(10), 0, dp(2));
+        tvUpdate = Ui.sub(this, updateText);
+        updRow.addView(tvUpdate, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView checkBtn = Ui.text(this, "检查更新", 13, Ui.ACCENT);
+        checkBtn.setPadding(dp(10), dp(6), dp(2), dp(6));
+        checkBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                checkUpdates();
+            }
+        });
+        updRow.addView(checkBtn);
+        body.addView(updRow);
 
         bannerBox = new LinearLayout(this);
         bannerBox.setOrientation(LinearLayout.VERTICAL);
@@ -388,23 +413,6 @@ public class MainActivity extends Activity {
         tvKernel = addModuleRow(card, "内核模块");
         tvNative = addModuleRow(card, "Native 模块");
         tvApp = addModuleRow(card, "管理器");
-        LinearLayout upd = new LinearLayout(this);
-        upd.setOrientation(LinearLayout.HORIZONTAL);
-        upd.setGravity(Gravity.CENTER_VERTICAL);
-        upd.setPadding(0, dp(10), 0, 0);
-        tvUpdate = Ui.sub(this, "未检查更新");
-        upd.addView(tvUpdate, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView check = Ui.text(this, "检查更新", 13, Ui.ACCENT);
-        check.setPadding(dp(10), dp(6), dp(2), dp(6));
-        check.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                checkUpdates();
-            }
-        });
-        upd.addView(check);
-        card.addView(upd);
 
         return card;
     }
@@ -791,7 +799,10 @@ public class MainActivity extends Activity {
         if (tvUpdate == null) {
             return;
         }
-        tvUpdate.setText("检查中…");
+        updateText = "检查中…";
+        if (tvUpdate != null) {
+            tvUpdate.setText(updateText);
+        }
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -840,8 +851,9 @@ public class MainActivity extends Activity {
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
+                        updateText = text;
                         if (tvUpdate != null) {
-                            tvUpdate.setText(text);
+                            tvUpdate.setText(updateText);
                         }
                     }
                 });
