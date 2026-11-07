@@ -28,7 +28,8 @@ import java.util.Map;
 
 public class MainActivity extends Activity {
 
-    private static final String SCRIPT = "p=/proc/adbhide_kmod\n" +
+    private static final String SCRIPT = "echo SU=1
+p=/proc/adbhide_kmod\n" +
             "echo KMOD=$([ -r $p ] && echo 1 || echo 0)\n" +
             "if [ -r $p ]; then\n" +
             "  echo KVER=$(head -n1 $p | cut -d' ' -f2)\n" +
