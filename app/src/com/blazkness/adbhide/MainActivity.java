@@ -585,11 +585,11 @@ public class MainActivity extends Activity {
                         0xFFB91C1C, 0xFFFEE2E2);
             } else {
                 if (!st.kmodOk) {
-                    addBanner("内核模块未加载，应用隐藏不可用",
+                    addBanner("内核模块未加载，部分隐藏不会生效",
                             0xFF92400E, 0xFFFEF3C7);
                 }
                 if (!st.nativeOk) {
-                    addBanner("Zygisk 模块未加载，进程层不可用",
+                    addBanner("Zygisk 模块未加载，部分隐藏不会生效",
                             0xFF92400E, 0xFFFEF3C7);
                 }
             }
