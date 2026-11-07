@@ -27,6 +27,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class MainHook implements IXposedHookLoadPackage {
 
     private static final String TAG = "AdbHide";
+    static final String PROBE_KEY = "adbhide_hook_probe";
     private static final String SYSTEM_PKG = "android";
     private static final String SETTINGS_PKG = "com.android.providers.settings";
     private static final String SPOOF_VALUE = "0";
@@ -103,7 +104,19 @@ public class MainHook implements IXposedHookLoadPackage {
                         return;
                     }
                     Object keyArg = param.args[1];
-                    if (!(keyArg instanceof String) || !isSpoofedKey((String) keyArg)) {
+                    if (!(keyArg instanceof String)) {
+                        return;
+                    }
+                    if (PROBE_KEY.equals(keyArg)) {
+                        if (Binder.getCallingUid() < 10000) {
+                            return;
+                        }
+                        Bundle probe = new Bundle();
+                        probe.putString("value", "1");
+                        param.setResult(probe);
+                        return;
+                    }
+                    if (!isSpoofedKey((String) keyArg)) {
                         return;
                     }
                     // system / root / shell keep seeing the real value: adb
@@ -122,7 +135,6 @@ public class MainHook implements IXposedHookLoadPackage {
         });
 
         XposedBridge.log(TAG + ": SettingsProvider.call hooks installed");
-        writeHookMark();
     }
 
     private void hookSystemProperties(XC_LoadPackage.LoadPackageParam lp) {
@@ -230,25 +242,5 @@ public class MainHook implements IXposedHookLoadPackage {
         return (a instanceof String) ? (String) a : null;
     }
 
-    private void writeHookMark() {
-        try {
-            String bootId = readBootId();
-            java.io.FileOutputStream out = new java.io.FileOutputStream("/data/system/adbhide.hook", false);
-            out.write(bootId.getBytes("UTF-8"));
-            out.close();
-        } catch (Throwable ignored) {
-        }
-    }
 
-    private String readBootId() {
-        try {
-            java.io.BufferedReader r = new java.io.BufferedReader(
-                    new java.io.FileReader("/proc/sys/kernel/random/boot_id"));
-            String line = r.readLine();
-            r.close();
-            return line == null ? "" : line.trim();
-        } catch (Throwable t) {
-            return "";
-        }
-    }
 }

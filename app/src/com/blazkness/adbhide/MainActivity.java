@@ -475,6 +475,18 @@ public class MainActivity extends Activity {
         }
         r.addView(texts, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        if (!active) {
+            TextView del = Ui.text(this, "删除", 13, Ui.BAD);
+            del.setPadding(dp(10), dp(6), dp(2), dp(6));
+            del.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    removePkg(pkg);
+                }
+            });
+            r.addView(del);
+        }
         return r;
     }
 
@@ -628,33 +640,20 @@ public class MainActivity extends Activity {
     }
 
     private boolean hookAlive() {
-        String bootId = readFile("/proc/sys/kernel/random/boot_id").trim();
-        if (bootId.isEmpty()) {
+        try {
+            return Settings.Global.getInt(getContentResolver(), "adbhide_hook_probe", 0) == 1;
+        } catch (Throwable t) {
             return false;
         }
-        return bootId.equals(readFile("/data/system/adbhide.hook").trim());
     }
 
-    private String readFile(String path) {
-        Process p = null;
+    private void removePkg(final String pkg) {
         try {
-            p = Runtime.getRuntime().exec(new String[]{"su", "-c", "cat " + path});
-            java.io.BufferedReader r = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(p.getInputStream()));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = r.readLine()) != null) {
-                sb.append(line).append('\n');
-            }
-            r.close();
-            p.waitFor();
-            return sb.toString();
-        } catch (Throwable t) {
-            return "";
-        } finally {
-            if (p != null) {
-                p.destroy();
-            }
+            Runtime.getRuntime().exec(new String[]{"su", "-c",
+                    "sed -i '/^" + pkg + "$/d' /data/adb/adbhide/blacklist.conf; "
+                            + "sh /data/adb/modules/adbhide_kmod/sync.sh"}).waitFor();
+        } catch (Throwable ignored) {
         }
+        refresh();
     }
 }

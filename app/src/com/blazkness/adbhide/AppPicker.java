@@ -203,6 +203,9 @@ final class AppPicker {
         Collections.sort(out, new Comparator<Entry>() {
             @Override
             public int compare(Entry a, Entry b) {
+                if (a.checked != b.checked) {
+                    return a.checked ? -1 : 1;
+                }
                 return a.label.compareToIgnoreCase(b.label);
             }
         });
