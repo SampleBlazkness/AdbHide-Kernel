@@ -64,6 +64,7 @@ public class MainActivity extends Activity {
     private TextView hint;
     private TextView tvSysState;
     private TextView tvReads;
+    private TextView tvBanner;
 
     private final java.util.Map<String, String> pending = new java.util.HashMap<String, String>();
     private long pendingUntil = 0L;
@@ -230,6 +231,17 @@ public class MainActivity extends Activity {
         headSub.setPadding(0, 0, 0, 0);
         head.addView(headSub);
         body.addView(head);
+
+        tvBanner = Ui.text(this, "", 16, 0xFFB91C1C);
+        tvBanner.setTypeface(Typeface.DEFAULT_BOLD);
+        tvBanner.setPadding(dp(14), dp(12), dp(14), dp(12));
+        tvBanner.setBackground(Ui.bg(0xFFFEE2E2, 12, this));
+        tvBanner.setVisibility(View.GONE);
+        LinearLayout.LayoutParams bannerLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        bannerLp.bottomMargin = dp(12);
+        body.addView(tvBanner, bannerLp);
 
         body.addView(systemCard());
         body.addView(listCard());
@@ -554,6 +566,15 @@ public class MainActivity extends Activity {
         tvMissingTitle.setVisibility(st.missing.isEmpty() ? View.GONE : View.VISIBLE);
         for (String pkg : st.missing) {
             missingBox.addView(pkgRow("-", pkg, false));
+        }
+
+        if (tvBanner != null) {
+            if (st.kmodOk) {
+                tvBanner.setVisibility(View.GONE);
+            } else {
+                tvBanner.setText("读不到内核模块状态\n应用隐藏与进程层当前不可用，请安装内核模块后重启");
+                tvBanner.setVisibility(View.VISIBLE);
+            }
         }
 
         tvKernel.setText(st.kmodOk ? "v" + st.kver : "未启用");
