@@ -49,13 +49,13 @@ final class AppPicker {
             }
         }
         final Dialog dialog = new Dialog(activity);
-        dialog.setTitle("选择要隐藏的应用");
+        dialog.setTitle(activity.getString(R.string.picker_title));
 
         LinearLayout root = new LinearLayout(activity);
         root.setOrientation(LinearLayout.VERTICAL);
 
         final CheckBox showSystem = new CheckBox(activity);
-        showSystem.setText("显示系统应用");
+        showSystem.setText(activity.getString(R.string.picker_show_system));
         showSystem.setChecked(false);
         showSystem.setPadding(Ui.dp(activity, 16), Ui.dp(activity, 10),
                 Ui.dp(activity, 16), Ui.dp(activity, 4));
@@ -140,7 +140,7 @@ final class AppPicker {
         actions.setPadding(Ui.dp(activity, 16), Ui.dp(activity, 10),
                 Ui.dp(activity, 16), Ui.dp(activity, 14));
 
-        TextView apply = Ui.action(activity, "保存并同步", true);
+        TextView apply = Ui.action(activity, activity.getString(R.string.save_sync), true);
         apply.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -160,7 +160,7 @@ final class AppPicker {
         actions.addView(apply, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView cancel = Ui.action(activity, "取消", false);
+        TextView cancel = Ui.action(activity, activity.getString(R.string.cancel), false);
         cancel.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
