@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="state_active">已生效</string>
+    <string name="state_inactive">未生效</string>
+    <string name="title_system">系统属性</string>
+    <string name="sub_lsposed">LSPosed 层，全局生效</string>
+    <string name="opt_master">全局伪装</string>
+    <string name="opt_master_desc">关闭后下面三项都不再伪造</string>
+    <string name="opt_dev">开发者选项</string>
+    <string name="opt_adb">ADB 调试</string>
+    <string name="opt_wifi">无线调试</string>
+    <string name="reads_format">本应用读到的值：adb=%1$s dev=%2$s wifi=%3$s</string>
+    <string name="title_kernel">内核隐藏</string>
+    <string name="manage_apps">管理应用</string>
+    <string name="summary_format">%1$d 个应用 · 文件 %2$d 行 · 生效 %3$d</string>
+    <string name="missing_title">未生效（包名不存在）</string>
+    <string name="pkg_missing">包名不存在，未写入内核</string>
+    <string name="list_empty">名单为空</string>
+    <string name="remove">删除</string>
+    <string name="loading">读取中…</string>
+    <string name="syncing">正在同步…</string>
+    <string name="read_failed">读取失败</string>
+    <string name="hint_no_state">读不到模块状态：%1$s</string>
+    <string name="hint_no_kmod">内核模块未启用：在 KernelSU 里装好 adbhide_kmod 后重启</string>
+    <string name="title_wireless">无线调试</string>
+    <string name="wireless_desc">自动发现已关闭（隐藏需要），手动连接仍然可用</string>
+    <string name="wireless_cmd">adb pair IP:端口 配对码\nadb connect IP:端口</string>
+    <string name="title_modules">子模块</string>
+    <string name="mod_kernel">内核模块</string>
+    <string name="mod_native">Native 模块</string>
+    <string name="mod_manager">管理器</string>
+    <string name="not_loaded">未启用</string>
+    <string name="check_update">检查更新</string>
+    <string name="update_idle">未检查更新</string>
+    <string name="update_checking">检查中…</string>
+    <string name="update_latest">已是最新</string>
+    <string name="update_available">有更新：%1$d 项</string>
+    <string name="update_failed">检查失败，请检查网络</string>
+    <string name="update_detail_title">可更新的组件</string>
+    <string name="ok">知道了</string>
+    <string name="banner_su">su 不可用，请先在 KernelSU 中授权 AdbHide</string>
+    <string name="banner_kmod">内核模块未加载，部分隐藏不会生效</string>
+    <string name="banner_zygisk">Zygisk 模块未加载，部分隐藏不会生效</string>
+    <string name="picker_title">选择要隐藏的应用</string>
+    <string name="picker_show_system">显示系统应用</string>
+    <string name="save_sync">保存并同步</string>
+    <string name="cancel">取消</string>
+    <string name="mod_app">应用</string>
+</resources>

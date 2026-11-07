@@ -68,7 +68,7 @@ public class MainActivity extends Activity {
     private TextView tvSysState;
     private TextView tvReads;
     private TextView tvUpdate;
-    private String updateText = "未检查更新";
+    private String updateText = "";
     private String updateDetail = "";
     private LinearLayout bannerBox;
 
@@ -89,7 +89,7 @@ public class MainActivity extends Activity {
         super.onStart();
         ticker.removeCallbacks(tick);
         ticker.post(tick);
-        if ("未检查更新".equals(updateText)) {
+        if (updateText.isEmpty()) {
             checkUpdates();
         }
     }
@@ -162,16 +162,14 @@ public class MainActivity extends Activity {
         applyEnabledState(swMaster.isChecked());
 
         boolean alive = "1".equals(callGlobal("adbhide_hook_probe"));
-        tvSysState.setText(alive ? "已生效" : "未生效");
+        tvSysState.setText(alive ? getString(R.string.state_active) : getString(R.string.state_inactive));
         tvSysState.setTextColor(alive ? Ui.OK : Ui.BAD);
         tvSysState.setBackground(Ui.bg(alive ? 0xFFE9F7EF : 0xFFFDECEC, 999, this));
         if (tvUpdate != null) {
             tvUpdate.setText(updateText);
         }
         if (tvReads != null) {
-            tvReads.setText("本应用读到的值：adb=" + callGlobal("adb_enabled")
-                    + " dev=" + callGlobal("development_settings_enabled")
-                    + " wifi=" + callGlobal("adb_wifi_enabled"));
+            tvReads.setText(getString(R.string.reads_format, callGlobal("adb_enabled"), callGlobal("development_settings_enabled"), callGlobal("adb_wifi_enabled")));
         }
     }
 
@@ -291,15 +289,15 @@ public class MainActivity extends Activity {
                     return;
                 }
                 new android.app.AlertDialog.Builder(MainActivity.this)
-                        .setTitle("可更新的组件")
+                        .setTitle(getString(R.string.update_detail_title))
                         .setMessage(updateDetail)
-                        .setPositiveButton("知道了", null)
+                        .setPositiveButton(getString(R.string.ok), null)
                         .show();
             }
         });
         updRow.addView(tvUpdate, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView checkBtn = Ui.text(this, "检查更新", 13, Ui.ACCENT);
+        TextView checkBtn = Ui.text(this, getString(R.string.check_update), 13, Ui.ACCENT);
         checkBtn.setPadding(dp(10), dp(6), dp(2), dp(6));
         checkBtn.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -337,27 +335,27 @@ public class MainActivity extends Activity {
         head.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
-        titles.addView(Ui.title(this, "系统属性"));
-        titles.addView(Ui.sub(this, "LSPosed 层，全局生效"));
+        titles.addView(Ui.title(this, getString(R.string.title_system)));
+        titles.addView(Ui.sub(this, getString(R.string.sub_lsposed)));
         head.addView(titles, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        tvSysState = Ui.chip(this, "未生效", false);
+        tvSysState = Ui.chip(this, getString(R.string.state_inactive), false);
         head.addView(tvSysState);
         card.addView(head);
 
         card.addView(Ui.divider(this));
 
         swMaster = newSwitch("master");
-        card.addView(row("全局伪装", "关闭后下面三项都不再伪造", swMaster));
+        card.addView(row(getString(R.string.opt_master), getString(R.string.opt_master_desc), swMaster));
 
         swDev = newSwitch("dev");
-        card.addView(row("开发者选项", "development_settings_enabled", swDev));
+        card.addView(row(getString(R.string.opt_dev), "development_settings_enabled", swDev));
 
         swAdb = newSwitch("adb");
-        card.addView(row("ADB 调试", "adb_enabled", swAdb));
+        card.addView(row(getString(R.string.opt_adb), "adb_enabled", swAdb));
 
         swWifi = newSwitch("wifi");
-        card.addView(row("无线调试", "adb_wifi_enabled", swWifi));
+        card.addView(row(getString(R.string.opt_wifi), "adb_wifi_enabled", swWifi));
 
         tvReads = Ui.sub(this, "");
         tvReads.setPadding(0, dp(10), 0, 0);
@@ -374,8 +372,8 @@ public class MainActivity extends Activity {
         head.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
-        titles.addView(Ui.title(this, "内核隐藏"));
-        tvListSummary = Ui.sub(this, "读取中…");
+        titles.addView(Ui.title(this, getString(R.string.title_kernel)));
+        tvListSummary = Ui.sub(this, getString(R.string.loading));
         titles.addView(tvListSummary);
         head.addView(titles, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
@@ -387,7 +385,7 @@ public class MainActivity extends Activity {
         listBox.setOrientation(LinearLayout.VERTICAL);
         card.addView(listBox);
 
-        tvMissingTitle = Ui.sub(this, "未生效（包名不存在）");
+        tvMissingTitle = Ui.sub(this, getString(R.string.missing_title));
         tvMissingTitle.setTextColor(Ui.BAD);
         tvMissingTitle.setPadding(0, dp(12), 0, dp(2));
         tvMissingTitle.setVisibility(View.GONE);
@@ -401,7 +399,7 @@ public class MainActivity extends Activity {
         actions.setOrientation(LinearLayout.HORIZONTAL);
         actions.setPadding(0, dp(14), 0, 0);
 
-        TextView manage = Ui.action(this, "管理应用", true);
+        TextView manage = Ui.action(this, getString(R.string.manage_apps), true);
         manage.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -422,10 +420,10 @@ public class MainActivity extends Activity {
 
     private LinearLayout wirelessCard() {
         LinearLayout card = Ui.card(this);
-        card.addView(Ui.title(this, "无线调试"));
-        card.addView(Ui.sub(this, "自动发现已关闭（隐藏需要），手动连接仍然可用"));
+        card.addView(Ui.title(this, getString(R.string.title_wireless)));
+        card.addView(Ui.sub(this, getString(R.string.wireless_desc)));
         TextView cmd = Ui.text(this,
-                "adb pair IP:端口 配对码\nadb connect IP:端口", 12, Ui.MUTED);
+                getString(R.string.wireless_cmd), 12, Ui.MUTED);
         cmd.setTypeface(Typeface.MONOSPACE);
         cmd.setPadding(0, dp(8), 0, 0);
         card.addView(cmd);
@@ -434,11 +432,11 @@ public class MainActivity extends Activity {
 
     private LinearLayout moduleCard() {
         LinearLayout card = Ui.card(this);
-        card.addView(Ui.title(this, "子模块"));
+        card.addView(Ui.title(this, getString(R.string.title_modules)));
         card.addView(Ui.divider(this));
-        tvKernel = addModuleRow(card, "内核模块");
-        tvNative = addModuleRow(card, "Native 模块");
-        tvApp = addModuleRow(card, "管理器");
+        tvKernel = addModuleRow(card, getString(R.string.mod_kernel));
+        tvNative = addModuleRow(card, getString(R.string.mod_native));
+        tvApp = addModuleRow(card, getString(R.string.mod_manager));
 
         return card;
     }
@@ -511,7 +509,7 @@ public class MainActivity extends Activity {
     // -------------------------------------------------------------- data/io
 
     private void syncList() {
-        hint.setText("正在同步…");
+        hint.setText(getString(R.string.syncing));
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -613,30 +611,29 @@ public class MainActivity extends Activity {
         binding = false;
         applyEnabledState(swMaster.isChecked());
 
-        tvSysState.setText(st.sysActive ? "已生效" : "未生效");
+        tvSysState.setText(st.sysActive ? getString(R.string.state_active) : getString(R.string.state_inactive));
         if (tvReads != null) {
             try {
                 int a = Settings.Global.getInt(getContentResolver(), "adb_enabled", -1);
                 int d = Settings.Global.getInt(getContentResolver(),
                         "development_settings_enabled", -1);
                 int w = Settings.Global.getInt(getContentResolver(), "adb_wifi_enabled", -1);
-                tvReads.setText("本应用读到的值：adb=" + a + " dev=" + d + " wifi=" + w);
+                tvReads.setText(getString(R.string.reads_format, String.valueOf(a), String.valueOf(d), String.valueOf(w)));
             } catch (Throwable t) {
-                tvReads.setText("读取失败");
+                tvReads.setText(getString(R.string.read_failed));
             }
         }
         tvSysState.setTextColor(st.sysActive ? Ui.OK : Ui.BAD);
         tvSysState.setBackground(Ui.bg(st.sysActive ? 0xFFE9F7EF : 0xFFFDECEC, 999, this));
 
-        tvListSummary.setText(st.uids.size() + " 个应用 · 文件 " + st.confTotal
-                + " 行 · 生效 " + st.confResolved);
+        tvListSummary.setText(getString(R.string.summary_format, st.uids.size(), st.confTotal, st.confResolved));
 
         listBox.removeAllViews();
         for (int i = 0; i < st.uids.size(); i++) {
             listBox.addView(pkgRow(st.uids.get(i), st.pkgs.get(i), true));
         }
         if (st.uids.isEmpty()) {
-            listBox.addView(Ui.text(this, "名单为空", 13, Ui.MUTED));
+            listBox.addView(Ui.text(this, getString(R.string.list_empty), 13, Ui.MUTED));
         }
 
         missingBox.removeAllViews();
@@ -648,15 +645,15 @@ public class MainActivity extends Activity {
         if (bannerBox != null) {
             bannerBox.removeAllViews();
             if (!st.suOk) {
-                addBanner("su 不可用，请先在 KernelSU 中授权 AdbHide",
+                addBanner(getString(R.string.banner_su),
                         0xFFB91C1C, 0xFFFEE2E2);
             } else {
                 if (!st.kmodOk) {
-                    addBanner("内核模块未加载，部分隐藏不会生效",
+                    addBanner(getString(R.string.banner_kmod),
                             0xFF92400E, 0xFFFEF3C7);
                 }
                 if (!st.nativeOk) {
-                    addBanner("Zygisk 模块未加载，部分隐藏不会生效",
+                    addBanner(getString(R.string.banner_zygisk),
                             0xFF92400E, 0xFFFEF3C7);
                 }
             }
@@ -664,16 +661,16 @@ public class MainActivity extends Activity {
                     ? View.GONE : View.VISIBLE);
         }
 
-        tvKernel.setText(st.kmodOk ? "v" + st.kver : "未启用");
+        tvKernel.setText(st.kmodOk ? "v" + st.kver : getString(R.string.not_loaded));
         tvKernel.setTextColor(st.kmodOk ? Ui.OK : Ui.BAD);
-        tvNative.setText(st.nativeOk ? st.nativeVer : "未启用");
+        tvNative.setText(st.nativeOk ? st.nativeVer : getString(R.string.not_loaded));
         tvNative.setTextColor(st.nativeOk ? Ui.OK : Ui.BAD);
         tvApp.setText("v" + st.appVer);
 
         if (!st.kmodOk && st.error != null) {
-            hint.setText("读不到模块状态：" + st.error);
+            hint.setText(getString(R.string.hint_no_state, String.valueOf(st.error)));
         } else if (!st.kmodOk) {
-            hint.setText("内核模块未启用：在 KernelSU 里装好 adbhide_kmod 后重启");
+            hint.setText(getString(R.string.hint_no_kmod));
         } else {
             hint.setText("");
         }
@@ -715,13 +712,13 @@ public class MainActivity extends Activity {
             TextView pkgView = Ui.text(this, pkg, 14, Ui.INK);
             pkgView.setTypeface(Typeface.MONOSPACE);
             texts.addView(pkgView);
-            texts.addView(Ui.text(this, "包名不存在，未写入内核", 10, Ui.BAD));
+            texts.addView(Ui.text(this, getString(R.string.pkg_missing), 10, Ui.BAD));
         }
         r.addView(texts, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         if (!active) {
-            TextView del = Ui.text(this, "删除", 13, Ui.BAD);
+            TextView del = Ui.text(this, getString(R.string.remove), 13, Ui.BAD);
             del.setPadding(dp(10), dp(6), dp(2), dp(6));
             del.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -825,7 +822,7 @@ public class MainActivity extends Activity {
         if (tvUpdate == null) {
             return;
         }
-        updateText = "检查中…";
+        updateText = getString(R.string.update_checking);
         if (tvUpdate != null) {
             tvUpdate.setText(updateText);
         }
@@ -859,20 +856,20 @@ public class MainActivity extends Activity {
                     int hits = 0;
                     if (isNewer(tag, appVer)) {
                         hits++;
-                        detail.append("应用 ").append(appVer).append(" → ").append(tag).append("\n");
+                        detail.append(getString(R.string.mod_app)).append(" ").append(appVer).append(" → ").append(tag).append("\n");
                     }
                     if (!kVer.isEmpty() && isNewer(kLatest, kVer)) {
                         hits++;
-                        detail.append("内核 ").append(kVer).append(" → ").append(kLatest).append("\n");
+                        detail.append(getString(R.string.mod_kernel)).append(" ").append(kVer).append(" → ").append(kLatest).append("\n");
                     }
                     if (!nVer.isEmpty() && isNewer(nLatest, nVer)) {
                         hits++;
                         detail.append("Zygisk ").append(nVer).append(" → ").append(nLatest).append("\n");
                     }
                     updateDetail = detail.toString().trim();
-                    out = hits == 0 ? "已是最新" : ("有更新：" + hits + " 项");
+                    out = hits == 0 ? getString(R.string.update_latest) : getString(R.string.update_available, hits);
                 } catch (Throwable t) {
-                    out = "检查失败，请检查网络";
+                    out = getString(R.string.update_failed);
                 }
                 final String text = out;
                 runOnUiThread(new Runnable() {
