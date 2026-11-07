@@ -36,17 +36,22 @@ javac --release 11 -nowarn -encoding UTF-8 -d "$OUT/stubs-classes" @"$OUT/stubs.
 (cd "$OUT/stubs-classes" && jar cf "$OUT/stubs.jar" .)
 
 echo "[2/6] resources"
-"$BT/aapt2$BIN" compile --dir "$APP/res" -o "$OUT/res.zip"
+mkdir -p "$OUT/gen"
+RES_ARGS=""
+if [ -d "$APP/res" ]; then
+  "$BT/aapt2$BIN" compile --dir "$APP/res" -o "$OUT/res.zip"
+  RES_ARGS="-R $OUT/res.zip"
+fi
 "$BT/aapt2$BIN" link -o "$OUT/base.apk" -I "$PLATFORM" \
   --manifest "$APP/AndroidManifest.xml" \
   --min-sdk-version 26 --target-sdk-version 33 \
   --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" \
-  -R "$OUT/res.zip" --java "$OUT/gen" --auto-add-overlay
+  $RES_ARGS --java "$OUT/gen" --auto-add-overlay
 
 echo "[3/6] javac"
 { find "$APP/src" -name '*.java'; find "$OUT/gen" -name '*.java'; } > "$OUT/src.list"
 javac --release 11 -nowarn -encoding UTF-8 \
-  -cp "$PLATFORM;$OUT/stubs.jar" -d "$OUT/classes" @"$OUT/src.list"
+  -cp "$PLATFORM;$OUT/stubs.jar;$ROOT/libs/libxposed-api.jar" -d "$OUT/classes" @"$OUT/src.list"
 (cd "$OUT/classes" && jar cf "$OUT/classes.jar" .)
 
 echo "[4/6] d8"
@@ -61,7 +66,9 @@ dst = os.path.join(out, "unsigned.apk")
 with zipfile.ZipFile(src) as zi, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zo:
     for item in zi.infolist():
         zo.writestr(item, zi.read(item.filename))
-    zo.write(os.path.join(out, "dex", "classes.dex"), "classes.dex")
+    zi_dex = zipfile.ZipInfo("classes.dex")
+    zi_dex.compress_type = zipfile.ZIP_STORED
+    zo.writestr(zi_dex, open(os.path.join(out, "dex", "classes.dex"), "rb").read())
     zo.write(os.path.join(app, "assets", "xposed_init"), "assets/xposed_init")
 print("  packed", dst)
 PY
@@ -79,6 +86,6 @@ ALIAS="$(prop keyAlias)"
 KEYPASS="$(prop keyPassword)"
 APK="$ROOT/dist/AdbHide-$VERSION_NAME.apk"
 "$BT/apksigner$SCRIPT" sign --ks "$KS" --ks-pass "pass:$KSPASS" --ks-key-alias "$ALIAS" \
-  --key-pass "pass:$KEYPASS" --min-sdk-version 26 --out "$APK" "$OUT/aligned.apk"
+  --key-pass "pass:$KEYPASS" --min-sdk-version 26 --alignment-preserved true --out "$APK" "$OUT/aligned.apk"
 "$BT/apksigner$SCRIPT" verify --print-certs "$APK" | head -4
 ls -l "$APK"

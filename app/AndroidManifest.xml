@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.blazkness.adbhide">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
@@ -9,7 +8,7 @@
         android:label="AdbHide">
 
         <activity
-            android:name=".MainActivity"
+            android:name="com.blazkness.adbhide.MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -22,12 +21,9 @@
             android:value="true" />
         <meta-data
             android:name="xposeddescription"
-            android:value="隐藏 ADB 调试状态:系统设置层默认生效,内核层按 uid 名单生效" />
+            android:value="Hide ADB state" />
         <meta-data
             android:name="xposedminversion"
-            android:value="93" />
-        <meta-data
-            android:name="xposedscope"
-            android:resource="@array/xposed_scope" />
+            android:value="102" />
     </application>
 </manifest>
