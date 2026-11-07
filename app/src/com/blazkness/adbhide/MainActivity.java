@@ -64,7 +64,7 @@ public class MainActivity extends Activity {
     private TextView hint;
     private TextView tvSysState;
     private TextView tvReads;
-    private TextView tvBanner;
+    private LinearLayout bannerBox;
 
     private final java.util.Map<String, String> pending = new java.util.HashMap<String, String>();
     private long pendingUntil = 0L;
@@ -99,6 +99,18 @@ public class MainActivity extends Activity {
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    private void addBanner(String text, int fg, int bg) {
+        TextView t = Ui.text(this, text, 16, fg);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setPadding(dp(14), dp(12), dp(14), dp(12));
+        t.setBackground(Ui.bg(bg, 12, this));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(8);
+        bannerBox.addView(t, lp);
     }
 
     private void setSwitch(Switch sw, boolean on) {
@@ -232,16 +244,14 @@ public class MainActivity extends Activity {
         head.addView(headSub);
         body.addView(head);
 
-        tvBanner = Ui.text(this, "", 16, 0xFFB91C1C);
-        tvBanner.setTypeface(Typeface.DEFAULT_BOLD);
-        tvBanner.setPadding(dp(14), dp(12), dp(14), dp(12));
-        tvBanner.setBackground(Ui.bg(0xFFFEE2E2, 12, this));
-        tvBanner.setVisibility(View.GONE);
+        bannerBox = new LinearLayout(this);
+        bannerBox.setOrientation(LinearLayout.VERTICAL);
+        bannerBox.setVisibility(View.GONE);
         LinearLayout.LayoutParams bannerLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         bannerLp.bottomMargin = dp(12);
-        body.addView(tvBanner, bannerLp);
+        body.addView(bannerBox, bannerLp);
 
         body.addView(systemCard());
         body.addView(listCard());
@@ -568,13 +578,23 @@ public class MainActivity extends Activity {
             missingBox.addView(pkgRow("-", pkg, false));
         }
 
-        if (tvBanner != null) {
-            if (st.kmodOk) {
-                tvBanner.setVisibility(View.GONE);
+        if (bannerBox != null) {
+            bannerBox.removeAllViews();
+            if (!st.suOk) {
+                addBanner("su 不可用，请先在 KernelSU 中授权 AdbHide",
+                        0xFFB91C1C, 0xFFFEE2E2);
             } else {
-                tvBanner.setText("读不到内核模块状态\n应用隐藏与进程层当前不可用，请安装内核模块后重启");
-                tvBanner.setVisibility(View.VISIBLE);
+                if (!st.kmodOk) {
+                    addBanner("内核模块未加载，应用隐藏不可用",
+                            0xFF92400E, 0xFFFEF3C7);
+                }
+                if (!st.nativeOk) {
+                    addBanner("Zygisk 模块未加载，进程层不可用",
+                            0xFF92400E, 0xFFFEF3C7);
+                }
             }
+            bannerBox.setVisibility(bannerBox.getChildCount() == 0
+                    ? View.GONE : View.VISIBLE);
         }
 
         tvKernel.setText(st.kmodOk ? "v" + st.kver : "未启用");
@@ -690,6 +710,7 @@ public class MainActivity extends Activity {
             }
         }
 
+        st.suOk = "1".equals(v.get("SU"));
         st.kmodOk = "1".equals(v.get("KMOD"));
         st.nativeOk = "1".equals(v.get("NATIVE"));
         st.kver = nz(v.get("KVER"));
@@ -782,6 +803,7 @@ public class MainActivity extends Activity {
     }
 
     private static final class State {
+        boolean suOk;
         boolean kmodOk;
         boolean nativeOk;
         boolean sysActive;
