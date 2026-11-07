@@ -859,7 +859,6 @@ public class MainActivity extends Activity {
                     }
                     updateDetail = detail.toString().trim();
                     out = hits == 0 ? "已是最新" : ("有更新：" + hits + " 项");
-                    out = sb.toString();
                 } catch (Throwable t) {
                     out = "检查失败，请检查网络";
                 }
