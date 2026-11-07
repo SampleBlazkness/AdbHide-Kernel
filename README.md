@@ -2,14 +2,23 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-1. 系统属性层面，伪造返回的开发者模式和调试状态为未启用（全局生效）。
-2. （可选）内核层面，完整伪造开发者模式和调试状态为未启用（只对黑名单内应用生效）。
+管理器（LSPosed 模块）、内核模块、Zygisk 模块，三层各管一部分：
+
+1. **LSPosed 层**：把应用读到的开发者模式、ADB 调试、无线调试改写成未启用，全局生效。
+2. **内核层**：对名单内的应用隐藏 adbd 的 socket、端口、`/proc/net` 记录与属性。
+   只有管理器已安装、且本次开机 LSPosed 层注入成功时才生效。
+3. **Zygisk 层**：在目标进程内替换属性内存映射，覆盖绕过 Java 层直接读属性文件的应用。
 
 ## 安装
 
 1. 执行 `uname -r`，按下表选择模块，在 KernelSU 里安装。
 2. 安装 `AdbHide-native-v*.zip`，重启。
-3. 安装 `AdbHide-*.apk`，在 KernelSU 里授予 root，在 LSPosed 里启用 AdbHide，作用域只勾选系统框架（默认已勾选），再重启。
+3. 安装 `AdbHide-*.apk`，在 KernelSU 里授予 root，在 LSPosed 里启用 AdbHide，
+   作用域勾选系统框架与设置存储（默认已勾选），再重启。
+4. 打开 AdbHide，点「管理应用」，勾选要隐藏的应用，保存即写入并同步到内核。
+
+> 1.3.1 及更早版本的签名与 1.4.0 不兼容。升级前需要先卸载旧版本，
+> 装好之后 LSPosed 作用域和 KernelSU 授权需要重新设置。
 
 | 内核版本（`uname -r`） | 要安装的模块名称                      |
 | ---------------------- | --------------------------------- |
@@ -42,9 +51,13 @@ KernelSU 3.3.x）上实际加载过；其余内核版本的模块没有实机验
 
 ## 使用
 
-- 增删应用：编辑 `/data/adb/adbhide/blacklist.conf`，一行一个包名，然后在 AdbHide 里点同步名单。
-  名单经 `/proc/adbhide_uids` 实时写入内核，netfilter 规则同时重建。
-- 确认生效：面板列出内核模块、Native 模块、系统设置层和端口规则，生效的打勾。
+- 增删应用：「管理应用」面板里勾选或取消，保存后写入
+  `/data/adb/adbhide/blacklist.conf` 并立即同步到内核，不需要重启。
+  面板默认不列系统应用，顶部可切换。
+- 开关：总开关和开发者选项 / ADB 调试 / 无线调试三个分项即时生效，不需要重启。
+  已经运行中的应用要重启才会重新读取设置。
+- 确认生效：顶部三条横幅分别提示 su、内核模块、Zygisk 模块的状态；
+  「系统属性」卡片显示 LSPosed 层是否注入成功。
 - 卸载：删除应用，卸载两个 KernelSU 模块，重启。
 
 ## 已知限制
@@ -53,7 +66,7 @@ KernelSU 3.3.x）上实际加载过；其余内核版本的模块没有实机验
   IDE 设备列表和扫码配对都找不到手机；手动 `adb pair` / `adb connect` 仍然可用。
 - `/sys/module/adbhide_kmod` 对普通应用可见。
 - 系统中会留下 ADB 曾被启用的记录。
-- 每次名单更新后需要在 AdbHide 中手动点击同步名单。
+- 运行中卸载管理器，内核层要等到下次开机才停用。
 - 除测试机外，其他内核组合按实验性对待。
 
 ## 命令行检查
@@ -81,16 +94,12 @@ export ANDROID_NDK_HOME=/path/to/android-ndk
 tools/build-native.sh
 ```
 
-管理器 APK（aapt2 → javac → d8 → apksigner，不需要 Gradle）：
+管理器 APK 由 GitHub Actions 构建（`.github/workflows/build-apk.yml`）。
+release 构建在本机用 `apksigner` 签名，密钥从 `~/.android/adbhide-release.properties`
+读取，不进入仓库。旧的 `tools/build-apk.sh`（aapt2 → javac → d8 手工打包）已弃用，
+产出的包 LSPosed 无法解析。
 
-```bash
-export ANDROID_SDK_ROOT=/path/to/android-sdk
-tools/build-apk.sh
-```
-
-两个脚本可在 Windows（Git Bash / MSYS2）、Linux 和 macOS 上运行，会自动选择最新的
-build-tools 和 platform。签名密钥从 `~/.android/adbhide-release.properties` 读取，
-可用 `RELEASE_PROPS` 指定别的路径。如果你需要自行编译，请使用你自己的签名密钥。
+如果你需要自行编译，请使用你自己的签名密钥。
 
 ## License
 
