@@ -323,12 +323,11 @@ public class MainHook implements IXposedHookLoadPackage {
                 }
             }
         };
-        for (java.lang.reflect.Method m : atms.getDeclaredMethods()) {
-            String n = m.getName();
-            if ((n.equals("getTasks") || n.equals("getRecentTasks") || n.equals("getFilteredTasks"))
-                    && List.class.isAssignableFrom(m.getReturnType())) {
-                XposedBridge.hookMethod(m, listHook);
+        for (String n : new String[]{"getTasks", "getRecentTasks", "getFilteredTasks"}) {
+            try {
+                XposedBridge.hookAllMethods(atms, n, listHook);
                 XposedBridge.log(TAG + ": hooked ATMS." + n);
+            } catch (Throwable ignored) {
             }
         }
     }
