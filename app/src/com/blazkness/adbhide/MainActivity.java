@@ -461,13 +461,16 @@ public class MainActivity extends Activity {
         } catch (Throwable ignored) {
         }
 
-        texts.addView(Ui.text(this, label, 15, Ui.INK));
-        TextView pkgView = Ui.text(this, pkg, 11, Ui.MUTED);
-        pkgView.setTypeface(Typeface.MONOSPACE);
-        texts.addView(pkgView);
         if (active) {
+            texts.addView(Ui.text(this, label, 15, Ui.INK));
+            TextView pkgView = Ui.text(this, pkg, 11, Ui.MUTED);
+            pkgView.setTypeface(Typeface.MONOSPACE);
+            texts.addView(pkgView);
             texts.addView(Ui.text(this, "uid " + uid, 10, Ui.MUTED));
         } else {
+            TextView pkgView = Ui.text(this, pkg, 14, Ui.INK);
+            pkgView.setTypeface(Typeface.MONOSPACE);
+            texts.addView(pkgView);
             texts.addView(Ui.text(this, "包名不存在，未写入内核", 10, Ui.BAD));
         }
         r.addView(texts, new LinearLayout.LayoutParams(0,
