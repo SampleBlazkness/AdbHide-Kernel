@@ -10,6 +10,7 @@ import android.content.res.ColorStateList;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.CompoundButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
@@ -189,27 +190,20 @@ public class MainActivity extends Activity {
         actions.setOrientation(LinearLayout.HORIZONTAL);
         actions.setPadding(0, dp(14), 0, 0);
 
-        TextView sync = Ui.action(this, "同步名单", true);
-        sync.setOnClickListener(new View.OnClickListener() {
+        TextView manage = Ui.action(this, "管理应用", true);
+        manage.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                syncList();
+                AppPicker.show(MainActivity.this, new Runnable() {
+                    @Override
+                    public void run() {
+                        refresh();
+                    }
+                });
             }
         });
-        actions.addView(sync, new LinearLayout.LayoutParams(0,
+        actions.addView(manage, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-
-        TextView refresh = Ui.action(this, "刷新", false);
-        refresh.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                refresh();
-            }
-        });
-        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        rp.leftMargin = dp(10);
-        actions.addView(refresh, rp);
         card.addView(actions);
 
         return card;
@@ -447,21 +441,34 @@ public class MainActivity extends Activity {
         r.setGravity(Gravity.CENTER_VERTICAL);
         r.setPadding(0, dp(7), 0, dp(7));
 
-        View dot = new View(this);
-        dot.setBackground(Ui.bg(active ? Ui.OK : Ui.BAD, 999, this));
-        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(7), dp(7));
-        dotLp.rightMargin = dp(10);
-        r.addView(dot, dotLp);
+        ImageView icon = new ImageView(this);
+        try {
+            icon.setImageDrawable(getPackageManager().getApplicationIcon(pkg));
+        } catch (Throwable ignored) {
+            icon.setImageDrawable(null);
+        }
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(40), dp(40));
+        ip.rightMargin = dp(12);
+        r.addView(icon, ip);
 
         LinearLayout texts = new LinearLayout(this);
         texts.setOrientation(LinearLayout.VERTICAL);
-        TextView name = Ui.text(this, pkg, 14, Ui.INK);
-        name.setTypeface(Typeface.MONOSPACE);
-        texts.addView(name);
+
+        String label = pkg;
+        try {
+            label = String.valueOf(getPackageManager()
+                    .getApplicationLabel(getPackageManager().getApplicationInfo(pkg, 0)));
+        } catch (Throwable ignored) {
+        }
+
+        texts.addView(Ui.text(this, label, 15, Ui.INK));
+        TextView pkgView = Ui.text(this, pkg, 11, Ui.MUTED);
+        pkgView.setTypeface(Typeface.MONOSPACE);
+        texts.addView(pkgView);
         if (active) {
-            texts.addView(Ui.text(this, "uid " + uid, 11, Ui.MUTED));
+            texts.addView(Ui.text(this, "uid " + uid, 10, Ui.MUTED));
         } else {
-            texts.addView(Ui.text(this, "包名不存在，未写入内核", 11, Ui.BAD));
+            texts.addView(Ui.text(this, "包名不存在，未写入内核", 10, Ui.BAD));
         }
         r.addView(texts, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
