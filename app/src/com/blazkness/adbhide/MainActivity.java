@@ -65,6 +65,9 @@ public class MainActivity extends Activity {
     private TextView tvSysState;
     private TextView tvReads;
 
+    private final java.util.Map<String, String> pending = new java.util.HashMap<String, String>();
+    private long pendingUntil = 0L;
+
     private final Handler ticker = new Handler(Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
         @Override
@@ -99,6 +102,13 @@ public class MainActivity extends Activity {
 
     private void updateLive() {
         String state = callGlobal("adbhide_props_state");
+        if (System.currentTimeMillis() < pendingUntil) {
+            for (java.util.Map.Entry<String, String> entry : pending.entrySet()) {
+                props.put(entry.getKey(), entry.getValue());
+            }
+        } else {
+            pending.clear();
+        }
         if (state != null && state.indexOf(',') > 0) {
             String[] parts = state.split(",");
             if (parts.length >= 5) {
@@ -382,6 +392,8 @@ public class MainActivity extends Activity {
                     return;
                 }
                 props.put(key, isChecked ? "1" : "0");
+                pending.put(key, isChecked ? "1" : "0");
+                pendingUntil = System.currentTimeMillis() + 2500L;
                 if ("master".equals(key)) {
                     applyEnabledState(isChecked);
                 }
