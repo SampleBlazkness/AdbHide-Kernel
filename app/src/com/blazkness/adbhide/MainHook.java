@@ -1,22 +1,11 @@
 package com.blazkness.adbhide;
 
-import android.content.ComponentName;
-import android.content.Intent;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.Process;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.lang.reflect.Field;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -156,179 +145,12 @@ public class MainHook implements IXposedHookLoadPackage {
                 if (SYSTEM_PKG.equals(lp.packageName) || SETTINGS_PKG.equals(lp.packageName)) {
                     hookSettingsProvider(lp);
                 }
-                if (SYSTEM_PKG.equals(lp.packageName)) {
-                    hookRecents(lp);
-                }
                 return;
             }
             hookSystemProperties(lp);
             hookNsd(lp);
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": load " + lp.packageName + " failed: " + t);
-        }
-    }
-
-    /** Packages whose tasks are removed from the recents list. Empty file = feature off. */
-    private static final String RECENTS_CONF = "/data/adb/adbhide/recents.conf";
-    private static volatile Set<String> recentsPkgs = Collections.emptySet();
-    private static volatile long recentsStamp = Long.MIN_VALUE;
-    private static long recentsLogAt = 0L;
-
-    private static Set<String> recentsPackages() {
-        File f = new File(RECENTS_CONF);
-        long stamp = (f.lastModified() << 20) ^ f.length();
-        if (stamp == recentsStamp) {
-            return recentsPkgs;
-        }
-        Set<String> out = new HashSet<>();
-        BufferedReader r = null;
-        try {
-            r = new BufferedReader(new FileReader(f));
-            String line;
-            while ((line = r.readLine()) != null) {
-                line = line.trim();
-                if (line.isEmpty() || line.startsWith("#")) {
-                    continue;
-                }
-                out.add(line);
-            }
-        } catch (Throwable ignored) {
-            // missing file: feature off
-        } finally {
-            if (r != null) {
-                try {
-                    r.close();
-                } catch (Throwable ignored) {
-                }
-            }
-        }
-        recentsPkgs = out;
-        recentsStamp = stamp;
-        return out;
-    }
-
-    private static String taskPackage(Object taskInfo) {
-        try {
-            Field f = taskInfo.getClass().getField("baseIntent");
-            Object v = f.get(taskInfo);
-            if (v instanceof Intent) {
-                ComponentName cn = ((Intent) v).getComponent();
-                if (cn != null) {
-                    return cn.getPackageName();
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-        try {
-            Field f = taskInfo.getClass().getField("realActivity");
-            Object v = f.get(taskInfo);
-            if (v instanceof ComponentName) {
-                return ((ComponentName) v).getPackageName();
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
-    }
-
-    /**
-     * Drops selected packages from the list the recents UI reads. The task
-     * itself keeps running; only its entry is filtered out.
-     */
-    private void hookRecents(XC_LoadPackage.LoadPackageParam lp) {
-        Class<?> cls;
-        try {
-            cls = Class.forName("com.android.server.wm.RecentTasks", false, lp.classLoader);
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + ": RecentTasks not found: " + t);
-            return;
-        }
-        XposedBridge.hookAllMethods(cls, "getRecentTasks", new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) {
-                try {
-                    Object res = param.getResult();
-                    if (!(res instanceof List)) {
-                        return;
-                    }
-                    Set<String> hide = recentsPackages();
-                    if (hide.isEmpty()) {
-                        return;
-                    }
-                    List<?> list = (List<?>) res;
-                    if (!list.isEmpty() && System.currentTimeMillis() - recentsLogAt > 5000) {
-                        recentsLogAt = System.currentTimeMillis();
-                        XposedBridge.log(TAG + ": recents via " + param.method.getName() + " n=" + list.size());
-                    }
-                    List<Object> keep = new ArrayList<>(list.size());
-                    for (Object o : list) {
-                        if (o == null) {
-                            continue;
-                        }
-                        String pkg = taskPackage(o);
-                        if (pkg != null && hide.contains(pkg)) {
-                            continue;
-                        }
-                        keep.add(o);
-                    }
-                    if (keep.size() != list.size()) {
-                        param.setResult(keep);
-                    }
-                } catch (Throwable t) {
-                    XposedBridge.log(TAG + ": recents filter failed: " + t);
-                }
-            }
-        });
-        XposedBridge.log(TAG + ": recents filter installed");
-
-        Class<?> atms;
-        try {
-            atms = Class.forName("com.android.server.wm.ActivityTaskManagerService", false, lp.classLoader);
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + ": ATMS not found: " + t);
-            return;
-        }
-        XC_MethodHook listHook = new XC_MethodHook() {
-            @Override
-            protected void afterHookedMethod(MethodHookParam param) {
-                try {
-                    Object res = param.getResult();
-                    if (!(res instanceof List)) {
-                        return;
-                    }
-                    Set<String> hide = recentsPackages();
-                    if (hide.isEmpty()) {
-                        return;
-                    }
-                    List<?> list = (List<?>) res;
-                    if (!list.isEmpty() && System.currentTimeMillis() - recentsLogAt > 5000) {
-                        recentsLogAt = System.currentTimeMillis();
-                        XposedBridge.log(TAG + ": recents via " + param.method.getName() + " n=" + list.size());
-                    }
-                    List<Object> keep = new ArrayList<>(list.size());
-                    for (Object o : list) {
-                        if (o == null) {
-                            continue;
-                        }
-                        String pkg = taskPackage(o);
-                        if (pkg != null && hide.contains(pkg)) {
-                            continue;
-                        }
-                        keep.add(o);
-                    }
-                    if (keep.size() != list.size()) {
-                        param.setResult(keep);
-                    }
-                } catch (Throwable t) {
-                    XposedBridge.log(TAG + ": recents filter failed: " + t);
-                }
-            }
-        };
-        for (String n : new String[]{"getTasks", "getRecentTasks", "getFilteredTasks"}) {
-            try {
-                XposedBridge.hookAllMethods(atms, n, listHook);
-                XposedBridge.log(TAG + ": hooked ATMS." + n);
-            } catch (Throwable ignored) {
-            }
         }
     }
 
