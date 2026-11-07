@@ -397,7 +397,7 @@ public class MainActivity extends Activity {
                 if ("master".equals(key)) {
                     applyEnabledState(isChecked);
                 }
-                saveProps();
+                saveProps(key, isChecked ? "1" : "0");
             }
         });
         return sw;
@@ -488,16 +488,27 @@ public class MainActivity extends Activity {
         return found;
     }
 
-    private void saveProps() {
-        String m = on("master"), d = on("dev"), a = on("adb"), w = on("wifi");
-        String e = props.containsKey("expires") ? props.get("expires") : "0";
-        String fmt = "printf 'master=%s\\ndev=%s\\nadb=%s\\nwifi=%s\\nexpires=%s\\n' "
-                + m + " " + d + " " + a + " " + w + " " + e;
-        String script = "mkdir -p /data/adb/adbhide\n"
-                + fmt + " > /data/system/adbhide.props\n"
-                + "chmod 644 /data/system/adbhide.props\n"
-                + fmt + " > /data/adb/adbhide/props.conf\n"
-                + "chmod 644 /data/adb/adbhide/props.conf\n";
+    private void saveProps(String key, String value) {
+        String script = "f=/data/system/adbhide.props
+"
+                + "touch $f
+"
+                + "if grep -q '^" + key + "=' $f; then
+"
+                + "  sed -i 's/^" + key + "=.*/" + key + "=" + value + "/' $f
+"
+                + "else
+"
+                + "  echo '" + key + "=" + value + "' >> $f
+"
+                + "fi
+"
+                + "chmod 644 $f
+"
+                + "cp $f /data/adb/adbhide/props.conf
+"
+                + "chmod 644 /data/adb/adbhide/props.conf
+";
         try {
             Runtime.getRuntime().exec(new String[]{"su", "-c", script}).waitFor();
         } catch (Throwable ignored) {
