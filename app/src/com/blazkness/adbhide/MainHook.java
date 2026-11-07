@@ -3,35 +3,34 @@ package com.blazkness.adbhide;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.Process;
-import android.os.SystemClock;
-import android.util.Log;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
-import java.lang.reflect.Method;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
-import io.github.libxposed.api.XposedModule;
-import io.github.libxposed.api.XposedModuleInterface;
+import de.robv.android.xposed.IXposedHookLoadPackage;
+import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XposedBridge;
+import de.robv.android.xposed.XposedHelpers;
+import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * libxposed API 102 module.
+ * Two independent layers.
  *
- * system_server: SettingsProvider runs in the system process on this ROM, so the
- * settings hook is installed from onSystemServerStarting(). Every caller with a
- * normal app uid gets "0" for the adb related global settings.
+ * system_server: SettingsProvider.call() answers "0" for the adb-related
+ * global settings, for every caller that is a normal app. This is on by
+ * default, matching the original AdbHide behaviour - no per-app setup needed.
  *
- * app processes: SystemProperties and NsdManager are rewritten for the apps that
- * are selected in the LSPosed scope.
+ * any injected app: SystemProperties is rewritten so Java-level reads see the
+ * same values the kernel module will report. Which apps get this layer is
+ * decided by the LSPosed scope, exactly as before.
  */
-public class MainHook extends XposedModule {
+public class MainHook implements IXposedHookLoadPackage {
 
     private static final String TAG = "AdbHide";
-    private static final String PROPS_FILE = "/data/system/adbhide.props";
-    private static final long PROPS_TTL_MS = 2000L;
+    private static final String SYSTEM_PKG = "android";
+    private static final String SETTINGS_PKG = "com.android.providers.settings";
     private static final String SPOOF_VALUE = "0";
+
 
     private static final String[] SETTINGS_KEYS = {
             "adb_enabled",
@@ -39,11 +38,8 @@ public class MainHook extends XposedModule {
             "adb_wifi_enabled",
     };
 
-    private static final Map<String, String> STRING_PROPS = new HashMap<String, String>();
-    private static final Map<String, String> INT_PROPS = new HashMap<String, String>();
-
-    private static long propsAt = 0L;
-    private static Map<String, String> propsCache = null;
+    private static final Map<String, String> STRING_PROPS = new HashMap<>();
+    private static final Map<String, String> INT_PROPS = new HashMap<>();
 
     static {
         STRING_PROPS.put("persist.sys.usb.config", "mtp");
@@ -58,92 +54,26 @@ public class MainHook extends XposedModule {
         INT_PROPS.put("ro.adb.secure", "1");
     }
 
-    // ------------------------------------------------------------- lifecycle
-
     @Override
-    public void onModuleLoaded(XposedModuleInterface.ModuleLoadedParam param) {
-        log(Log.INFO, TAG, "loaded in " + param.getProcessName()
-                + " system=" + param.isSystemServer());
-    }
-
-    @Override
-    public void onSystemServerStarting(XposedModuleInterface.SystemServerStartingParam param) {
-        log(Log.INFO, TAG, "system server starting, installing settings hook");
-        hookSettingsProvider(param.getClassLoader());
-    }
-
-    @Override
-    public void onPackageReady(XposedModuleInterface.PackageReadyParam param) {
+    public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lp) {
+        if (lp == null || lp.packageName == null) {
+            return;
+        }
         try {
-            String pkg = param.getPackageName();
-            int uid = param.getApplicationInfo() != null
-                    ? param.getApplicationInfo().uid : Process.myUid();
-            if (uid < 10000) {
-                if ("com.android.providers.settings".equals(pkg)) {
-                    hookSettingsProvider(param.getClassLoader());
+            // System processes (uid < 10000) must never get the property layer:
+            // it is meant for apps, and spoofing props inside telecom/settings
+            // would change system behaviour. Only the settings provider matters.
+            if (Process.myUid() < 10000) {
+                if (SYSTEM_PKG.equals(lp.packageName) || SETTINGS_PKG.equals(lp.packageName)) {
+                    hookSettingsProvider(lp);
                 }
                 return;
             }
-            hookSystemProperties(param.getClassLoader());
-            hookNsd(param.getClassLoader());
+            hookSystemProperties(lp);
+            hookNsd(lp);
         } catch (Throwable t) {
-            log(Log.ERROR, TAG, "package hooks failed: " + t);
+            XposedBridge.log(TAG + ": load " + lp.packageName + " failed: " + t);
         }
-    }
-
-    // -------------------------------------------------------------- settings
-
-    private void hookSettingsProvider(ClassLoader cl) {
-        Class<?> provider;
-        try {
-            provider = Class.forName("com.android.providers.settings.SettingsProvider", false, cl);
-        } catch (Throwable t) {
-            log(Log.ERROR, TAG, "SettingsProvider class not found: " + t);
-            return;
-        }
-
-        int count = 0;
-        for (final Method m : provider.getDeclaredMethods()) {
-            if (!"call".equals(m.getName())) {
-                continue;
-            }
-            Class<?>[] types = m.getParameterTypes();
-            if (types.length < 2 || types[0] != String.class || types[1] != String.class) {
-                continue;
-            }
-            try {
-                hook(m).intercept(new io.github.libxposed.api.XposedInterface.Hooker() {
-                    @Override
-                    public Object intercept(io.github.libxposed.api.XposedInterface.Chain chain)
-                            throws Throwable {
-                        Object result = chain.proceed();
-                        try {
-                            Object keyArg = chain.getArg(1);
-                            if (!(keyArg instanceof String)) {
-                                return result;
-                            }
-                            String key = (String) keyArg;
-                            if (!isSpoofedKey(key) || !spoofEnabled(key)) {
-                                return result;
-                            }
-                            if (Binder.getCallingUid() < 10000) {
-                                return result;
-                            }
-                            Bundle bundle = (result instanceof Bundle)
-                                    ? (Bundle) result : new Bundle();
-                            bundle.putString("value", SPOOF_VALUE);
-                            return bundle;
-                        } catch (Throwable ignored) {
-                            return result;
-                        }
-                    }
-                });
-                count++;
-            } catch (Throwable t) {
-                log(Log.ERROR, TAG, "hook call() failed: " + t);
-            }
-        }
-        log(Log.INFO, TAG, "SettingsProvider.call hooks installed: " + count);
     }
 
     private boolean isSpoofedKey(String key) {
@@ -155,171 +85,147 @@ public class MainHook extends XposedModule {
         return false;
     }
 
-    private String propKey(String setting) {
-        if ("development_settings_enabled".equals(setting)) {
-            return "dev";
-        }
-        if ("adb_wifi_enabled".equals(setting)) {
-            return "wifi";
-        }
-        return "adb";
-    }
-
-    private Map<String, String> props() {
-        long now = SystemClock.elapsedRealtime();
-        if (propsCache != null && now - propsAt < PROPS_TTL_MS) {
-            return propsCache;
-        }
-        Map<String, String> out = new LinkedHashMap<String, String>();
-        BufferedReader r = null;
+    private void hookSettingsProvider(XC_LoadPackage.LoadPackageParam lp) {
+        Class<?> provider;
         try {
-            r = new BufferedReader(new FileReader(PROPS_FILE));
-            String line;
-            while ((line = r.readLine()) != null) {
-                int eq = line.indexOf('=');
-                if (eq > 0) {
-                    out.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
-                }
-            }
-        } catch (Throwable ignored) {
-        } finally {
-            try {
-                if (r != null) {
-                    r.close();
-                }
-            } catch (Throwable ignored) {
-            }
+            provider = Class.forName("com.android.providers.settings.SettingsProvider",
+                    false, lp.classLoader);
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": SettingsProvider not found: " + t);
+            return;
         }
-        propsCache = out;
-        propsAt = now;
-        return out;
+
+        XposedBridge.hookAllMethods(provider, "call", new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                try {
+                    if (param.args == null || param.args.length < 2) {
+                        return;
+                    }
+                    Object keyArg = param.args[1];
+                    if (!(keyArg instanceof String) || !isSpoofedKey((String) keyArg)) {
+                        return;
+                    }
+                    // system / root / shell keep seeing the real value: adb
+                    // debugging itself must not be broken by this module
+                    if (Binder.getCallingUid() < 10000) {
+                        return;
+                    }
+                    Object result = param.getResult();
+                    Bundle bundle = (result instanceof Bundle) ? (Bundle) result : new Bundle();
+                    bundle.putString("value", SPOOF_VALUE);
+                    param.setResult(bundle);
+                } catch (Throwable t) {
+                    XposedBridge.log(TAG + ": call hook: " + t);
+                }
+            }
+        });
+
+        XposedBridge.log(TAG + ": SettingsProvider.call hooks installed");
     }
 
-    private boolean spoofEnabled(String setting) {
-        Map<String, String> p = props();
-        if (p.isEmpty()) {
-            return true;
-        }
-        if ("0".equals(p.get("master"))) {
-            return false;
-        }
-        String exp = p.get("expires");
-        if (exp != null && !exp.isEmpty()) {
-            try {
-                long until = Long.parseLong(exp);
-                if (until > 0L && System.currentTimeMillis() > until) {
-                    return false;
-                }
-            } catch (Throwable ignored) {
-            }
-        }
-        String v = p.get(propKey(setting));
-        return v == null || "1".equals(v);
-    }
-
-    // -------------------------------------------------------- system props
-
-    private void hookSystemProperties(ClassLoader cl) {
+    private void hookSystemProperties(XC_LoadPackage.LoadPackageParam lp) {
         Class<?> props;
         try {
-            props = Class.forName("android.os.SystemProperties", false, cl);
+            props = Class.forName("android.os.SystemProperties", false, lp.classLoader);
         } catch (Throwable t) {
             return;
         }
 
-        for (final Method m : props.getDeclaredMethods()) {
-            final String name = m.getName();
-            final Class<?> ret = m.getReturnType();
-            boolean isString = "get".equals(name) && ret == String.class;
-            boolean isInt = "getInt".equals(name) && ret == int.class;
-            boolean isBool = "getBoolean".equals(name) && ret == boolean.class;
-            if (!isString && !isInt && !isBool) {
-                continue;
+        XposedBridge.hookAllMethods(props, "get", new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                String key = firstString(param);
+                if (key == null) {
+                    return;
+                }
+                String fake = STRING_PROPS.get(key);
+                if (fake != null) {
+                    param.setResult(fake);
+                }
             }
-            try {
-                hook(m).intercept(new io.github.libxposed.api.XposedInterface.Hooker() {
-                    @Override
-                    public Object intercept(io.github.libxposed.api.XposedInterface.Chain chain)
-                            throws Throwable {
-                        Object keyArg = chain.getArg(0);
-                        if (!(keyArg instanceof String)) {
-                            return chain.proceed();
-                        }
-                        String key = (String) keyArg;
-                        if (isString) {
-                            String fake = STRING_PROPS.get(key);
-                            return fake != null ? fake : chain.proceed();
-                        }
-                        String fake = INT_PROPS.get(key);
-                        if (fake == null) {
-                            return chain.proceed();
-                        }
-                        if (isBool) {
-                            return "1".equals(fake);
-                        }
-                        try {
-                            return Integer.parseInt(fake);
-                        } catch (Throwable t) {
-                            return chain.proceed();
-                        }
-                    }
-                });
-            } catch (Throwable ignored) {
+        });
+
+        XC_MethodHook intHook = new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                String key = firstString(param);
+                if (key == null) {
+                    return;
+                }
+                String fake = INT_PROPS.get(key);
+                if (fake == null) {
+                    return;
+                }
+                try {
+                    param.setResult(Integer.parseInt(fake));
+                } catch (Throwable ignored) {
+                }
             }
-        }
-        log(Log.INFO, TAG, "SystemProperties hooks installed");
+        };
+        XposedBridge.hookAllMethods(props, "getInt", intHook);
+        XposedBridge.hookAllMethods(props, "getBoolean", new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                String key = firstString(param);
+                if (key == null) {
+                    return;
+                }
+                String fake = INT_PROPS.get(key);
+                if (fake != null) {
+                    param.setResult("1".equals(fake));
+                }
+            }
+        });
+
+        HookState.appHooked = true;
+        XposedBridge.log(TAG + ": SystemProperties hooks installed in " + lp.packageName);
     }
 
-    // ---------------------------------------------------------------- nsd
-
-    private void hookNsd(ClassLoader cl) {
+    private void hookNsd(XC_LoadPackage.LoadPackageParam lp) {
         try {
-            Class<?> info = Class.forName("android.net.nsd.NsdServiceInfo", false, cl);
-            for (final Method m : info.getDeclaredMethods()) {
-                if (!"getServiceType".equals(m.getName()) && !"getServiceName".equals(m.getName())) {
-                    continue;
-                }
-                try {
-                    hook(m).intercept(new io.github.libxposed.api.XposedInterface.Hooker() {
-                        @Override
-                        public Object intercept(io.github.libxposed.api.XposedInterface.Chain chain)
-                                throws Throwable {
-                            Object r = chain.proceed();
-                            if (r instanceof String && ((String) r).contains("_adb")) {
-                                return "_hidden._tcp";
-                            }
-                            return r;
-                        }
-                    });
-                } catch (Throwable ignored) {
-                }
-            }
+            Class<?> info = XposedHelpers.findClass("android.net.nsd.NsdServiceInfo", lp.classLoader);
 
-            Class<?> mgr = Class.forName("android.net.nsd.NsdManager", false, cl);
-            for (final Method m : mgr.getDeclaredMethods()) {
-                if (!"discoverServices".equals(m.getName())) {
-                    continue;
+            XC_MethodHook scrub = new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) {
+                    Object r = param.getResult();
+                    if (r instanceof String && ((String) r).contains("_adb")) {
+                        param.setResult("_hidden._tcp");
+                    }
                 }
-                try {
-                    hook(m).intercept(new io.github.libxposed.api.XposedInterface.Hooker() {
+            };
+            XposedHelpers.findAndHookMethod(info, "getServiceType", scrub);
+            XposedHelpers.findAndHookMethod(info, "getServiceName", scrub);
+
+            Class<?> listener = XposedHelpers.findClass(
+                    "android.net.nsd.NsdManager$DiscoveryListener", lp.classLoader);
+            Class<?> mgr = XposedHelpers.findClass("android.net.nsd.NsdManager", lp.classLoader);
+
+            XposedHelpers.findAndHookMethod(mgr, "discoverServices", String.class, int.class,
+                    listener, new XC_MethodHook() {
                         @Override
-                        public Object intercept(io.github.libxposed.api.XposedInterface.Chain chain)
-                                throws Throwable {
-                            Object t = chain.getArg(0);
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            Object t = param.args[0];
                             if (t instanceof String
                                     && ((String) t).toLowerCase().contains("_adb")) {
-                                log(Log.INFO, TAG, "blocked NsdManager discovery of " + t);
-                                return null;
+                                param.setResult(null);
+                                XposedBridge.log(TAG + ": blocked NsdManager discovery of " + t);
                             }
-                            return chain.proceed();
                         }
                     });
-                } catch (Throwable ignored) {
-                }
-            }
-            log(Log.INFO, TAG, "NsdManager hooks installed");
+
+            XposedBridge.log(TAG + ": NsdManager hooks installed in " + lp.packageName);
         } catch (Throwable t) {
-            log(Log.ERROR, TAG, "NsdManager hook failed: " + t);
+            XposedBridge.log(TAG + ": NsdManager hook failed: " + t);
         }
+    }
+
+    private static String firstString(XC_MethodHook.MethodHookParam param) {
+        if (param.args == null || param.args.length == 0) {
+            return null;
+        }
+        Object a = param.args[0];
+        return (a instanceof String) ? (String) a : null;
     }
 }
