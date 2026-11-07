@@ -46,7 +46,9 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            signingConfig signingConfigs.releaseKey
+            if (signingConfigs.releaseKey.storeFile != null) {
+                signingConfig signingConfigs.releaseKey
+            }
         }
     }
 }
