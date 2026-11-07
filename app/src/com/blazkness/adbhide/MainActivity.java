@@ -100,15 +100,14 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void setSwitch(Switch sw, boolean on) {
+        if (sw != null && sw.isChecked() != on) {
+            sw.setChecked(on);
+        }
+    }
+
     private void updateLive() {
         String state = callGlobal("adbhide_props_state");
-        if (System.currentTimeMillis() < pendingUntil) {
-            for (java.util.Map.Entry<String, String> entry : pending.entrySet()) {
-                props.put(entry.getKey(), entry.getValue());
-            }
-        } else {
-            pending.clear();
-        }
         if (state != null && state.indexOf(',') > 0) {
             String[] parts = state.split(",");
             if (parts.length >= 5) {
@@ -125,11 +124,18 @@ public class MainActivity extends Activity {
                 props.putAll(fresh);
             }
         }
+        if (System.currentTimeMillis() < pendingUntil) {
+            for (java.util.Map.Entry<String, String> entry : pending.entrySet()) {
+                props.put(entry.getKey(), entry.getValue());
+            }
+        } else {
+            pending.clear();
+        }
         binding = true;
-        swMaster.setChecked(!"0".equals(props.get("master")));
-        swDev.setChecked(!"0".equals(props.get("dev")));
-        swAdb.setChecked(!"0".equals(props.get("adb")));
-        swWifi.setChecked(!"0".equals(props.get("wifi")));
+        setSwitch(swMaster, !"0".equals(props.get("master")));
+        setSwitch(swDev, !"0".equals(props.get("dev")));
+        setSwitch(swAdb, !"0".equals(props.get("adb")));
+        setSwitch(swWifi, !"0".equals(props.get("wifi")));
         binding = false;
         applyEnabledState(swMaster.isChecked());
 
@@ -511,10 +517,10 @@ public class MainActivity extends Activity {
 
     private void render(State st) {
         binding = true;
-        swMaster.setChecked(!"0".equals(props.get("master")));
-        swDev.setChecked(!"0".equals(props.get("dev")));
-        swAdb.setChecked(!"0".equals(props.get("adb")));
-        swWifi.setChecked(!"0".equals(props.get("wifi")));
+        setSwitch(swMaster, !"0".equals(props.get("master")));
+        setSwitch(swDev, !"0".equals(props.get("dev")));
+        setSwitch(swAdb, !"0".equals(props.get("adb")));
+        setSwitch(swWifi, !"0".equals(props.get("wifi")));
         binding = false;
         applyEnabledState(swMaster.isChecked());
 

@@ -30,7 +30,7 @@ public class MainHook implements IXposedHookLoadPackage {
     static final String PROBE_KEY = "adbhide_hook_probe";
     static final String PROBE_STATE_KEY = "adbhide_props_state";
     private static final String PROPS_FILE = "/data/system/adbhide.props";
-    private static final long PROPS_TTL_MS = 2000L;
+    private static final long PROPS_TTL_MS = 250L;
     private static long propsReadAt = 0L;
     private static boolean pMaster = true;
     private static boolean pDev = true;
