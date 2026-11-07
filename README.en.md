@@ -2,14 +2,22 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
-1. At the system property level, developer options and the debugging state are reported as disabled (globally).
-2. (Optional) At the kernel level, the same state is reported as disabled, only for apps on the blacklist.
+Manager (an LSPosed module), a kernel module and a Zygisk module, each covering one layer:
+
+1. **LSPosed layer**: developer options, ADB debugging and wireless debugging are reported as disabled to every app.
+2. **Kernel layer**: hides adbd's socket, ports, `/proc/net` rows and properties from the apps on the list. It only runs when the manager is installed and the LSPosed layer was injected in this boot.
+3. **Zygisk layer**: replaces the property memory mapping inside target processes, covering apps that read the property file directly instead of going through the Java API.
 
 ## Install
 
 1. Run `uname -r`, pick the module from the table below, install it in KernelSU.
 2. Install `AdbHide-native-v*.zip`, then reboot.
-3. Install `AdbHide-*.apk`, grant root in KernelSU, enable AdbHide in LSPosed with only the system framework scope (selected by default), then reboot.
+3. Install `AdbHide-*.apk`, grant root in KernelSU, enable AdbHide in LSPosed with the system
+   framework and settings storage scopes (both selected by default), then reboot.
+4. Open AdbHide, tap "Manage apps", tick the apps to hide; saving writes and syncs immediately.
+
+> The signing key changed in 1.4.0. You need to uninstall anything older before installing,
+> then set the LSPosed scope and KernelSU grant again.
 
 | Kernel line (`uname -r`) | Module to install                 |
 | ------------------------ | --------------------------------- |
@@ -43,11 +51,13 @@ Recovery order:
 
 ## Usage
 
-- Add or remove an app: edit `/data/adb/adbhide/blacklist.conf`, one package per line, then tap
-  the sync button in AdbHide. The list goes into the kernel through `/proc/adbhide_uids` and the
-  netfilter rules are rebuilt.
-- Verify: the panel lists the kernel module, the native module, the settings layer and the port
-  rules, and ticks the ones that are active.
+- Add or remove an app: in "Manage apps", tick or untick it. Saving writes
+  `/data/adb/adbhide/blacklist.conf` and syncs to the kernel immediately, no reboot needed.
+  System apps are hidden from the list by default; the toggle at the top shows them.
+- Switches: the master switch and the three per-setting switches apply immediately, no reboot.
+  Apps that are already running need a restart before they read the new value.
+- Verify: the banners at the top report su, the kernel module and the Zygisk module; the
+  "System properties" card reports whether the LSPosed layer was injected.
 - Uninstall: remove the app, uninstall both KernelSU modules, reboot.
 
 ## Known limitations
@@ -57,7 +67,7 @@ Recovery order:
   and `adb connect` still work.
 - `/sys/module/adbhide_kmod` is visible to any app.
 - The system keeps a record that ADB was enabled.
-- After every change to the list, tap sync in AdbHide.
+- Uninstalling the manager while it runs leaves the kernel layer active until the next boot.
 - Every kernel combination other than the tested device is experimental.
 
 ## Command-line check
@@ -85,16 +95,12 @@ export ANDROID_NDK_HOME=/path/to/android-ndk
 tools/build-native.sh
 ```
 
-Manager APK (aapt2 → javac → d8 → apksigner, no Gradle):
+The manager APK is built by GitHub Actions (`.github/workflows/build-apk.yml`). Release builds
+are signed locally with `apksigner`; the key is read from `~/.android/adbhide-release.properties`
+and never enters the repository. The old `tools/build-apk.sh` (aapt2 → javac → d8 by hand) is
+deprecated — LSPosed could not parse what it produced.
 
-```bash
-export ANDROID_SDK_ROOT=/path/to/android-sdk
-tools/build-apk.sh
-```
-
-Both scripts run on Windows (Git Bash / MSYS2), Linux and macOS, and pick the newest build-tools
-and platform automatically. The signing key is read from `~/.android/adbhide-release.properties`
-(override with `RELEASE_PROPS`). If you build it yourself, use your own signing key.
+If you build it yourself, use your own signing key.
 
 ## License
 
