@@ -1,9 +1,5 @@
 # AdbHide-Kernel
 
-> **1.4.0 has been withdrawn.** After publishing we found that LSPosed cannot parse
-> the APK, so the module never loads and neither the property spoofing nor the kernel
-> hiding takes effect. A fix is in progress; use 1.3.1 until then.
-
 [简体中文](README.md) | [English](README.en.md)
 
 Manager (an LSPosed module), a kernel module and a Zygisk module, each covering one layer:

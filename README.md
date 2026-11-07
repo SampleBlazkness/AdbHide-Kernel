@@ -1,8 +1,4 @@
 # AdbHide-Kernel
-
-> **1.4.0 已撤回。** 发布后发现 LSPosed 无法解析该版本的 APK，模块不会被加载，
-> 属性伪装与内核隐藏都不会生效。问题正在修复，修好前请继续使用 1.3.1。
-
 [简体中文](README.md) | [English](README.en.md)
 
 管理器（LSPosed 模块）、内核模块、Zygisk 模块，三层各管一部分：
