@@ -28,6 +28,7 @@ public class MainHook implements IXposedHookLoadPackage {
 
     private static final String TAG = "AdbHide";
     static final String PROBE_KEY = "adbhide_hook_probe";
+    static final String PROBE_STATE_KEY = "adbhide_props_state";
     private static final String PROPS_FILE = "/data/system/adbhide.props";
     private static final long PROPS_TTL_MS = 2000L;
     private static long propsReadAt = 0L;
@@ -181,6 +182,20 @@ public class MainHook implements IXposedHookLoadPackage {
                     }
                     Object keyArg = param.args[1];
                     if (!(keyArg instanceof String)) {
+                        return;
+                    }
+                    if (PROBE_STATE_KEY.equals(keyArg)) {
+                        if (Binder.getCallingUid() < 10000) {
+                            return;
+                        }
+                        loadProps();
+                        Bundle state = new Bundle();
+                        state.putString("value", (pMaster ? "1" : "0") + ","
+                                + (pDev ? "1" : "0") + ","
+                                + (pAdb ? "1" : "0") + ","
+                                + (pWifi ? "1" : "0") + ","
+                                + pExpires);
+                        param.setResult(state);
                         return;
                     }
                     if (PROBE_KEY.equals(keyArg)) {

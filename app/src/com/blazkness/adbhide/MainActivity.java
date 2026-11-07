@@ -98,10 +98,22 @@ public class MainActivity extends Activity {
     }
 
     private void updateLive() {
-        java.util.Map<String, String> fresh = readPropsFile();
-        if (!fresh.isEmpty()) {
-            props.clear();
-            props.putAll(fresh);
+        String state = callGlobal("adbhide_props_state");
+        if (state != null && state.indexOf(',') > 0) {
+            String[] parts = state.split(",");
+            if (parts.length >= 5) {
+                props.put("master", parts[0]);
+                props.put("dev", parts[1]);
+                props.put("adb", parts[2]);
+                props.put("wifi", parts[3]);
+                props.put("expires", parts[4]);
+            }
+        } else {
+            java.util.Map<String, String> fresh = readPropsFile();
+            if (!fresh.isEmpty()) {
+                props.clear();
+                props.putAll(fresh);
+            }
         }
         binding = true;
         swMaster.setChecked(!"0".equals(props.get("master")));
