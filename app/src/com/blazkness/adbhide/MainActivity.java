@@ -69,6 +69,7 @@ public class MainActivity extends Activity {
     private TextView tvReads;
     private TextView tvUpdate;
     private String updateText = "未检查更新";
+    private String updateDetail = "";
     private LinearLayout bannerBox;
 
     private final java.util.Map<String, String> pending = new java.util.HashMap<String, String>();
@@ -271,8 +272,19 @@ public class MainActivity extends Activity {
         updRow.setGravity(Gravity.CENTER_VERTICAL);
         updRow.setPadding(0, dp(10), 0, dp(2));
         tvUpdate = Ui.text(this, updateText, 11, Ui.MUTED);
-        tvUpdate.setMaxLines(1);
-        tvUpdate.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        tvUpdate.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (updateDetail == null || updateDetail.isEmpty()) {
+                    return;
+                }
+                new android.app.AlertDialog.Builder(MainActivity.this)
+                        .setTitle("可更新的组件")
+                        .setMessage(updateDetail)
+                        .setPositiveButton("知道了", null)
+                        .show();
+            }
+        });
         updRow.addView(tvUpdate, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         TextView checkBtn = Ui.text(this, "检查更新", 13, Ui.ACCENT);
@@ -831,27 +843,22 @@ public class MainActivity extends Activity {
                         }
                     }
                     StringBuilder sb = new StringBuilder();
-                    java.util.List<String> hits = new java.util.ArrayList<String>();
+                    StringBuilder detail = new StringBuilder();
+                    int hits = 0;
                     if (isNewer(tag, appVer)) {
-                        hits.add("应用→" + tag);
+                        hits++;
+                        detail.append("应用 ").append(appVer).append(" → ").append(tag).append("\n");
                     }
                     if (!kVer.isEmpty() && isNewer(kLatest, kVer)) {
-                        hits.add("内核→" + kLatest);
+                        hits++;
+                        detail.append("内核 ").append(kVer).append(" → ").append(kLatest).append("\n");
                     }
                     if (!nVer.isEmpty() && isNewer(nLatest, nVer)) {
-                        hits.add("Zygisk→" + nLatest);
+                        hits++;
+                        detail.append("Zygisk ").append(nVer).append(" → ").append(nLatest).append("\n");
                     }
-                    if (hits.isEmpty()) {
-                        sb.append("已是最新");
-                    } else {
-                        sb.append("可更新：");
-                        for (int i = 0; i < hits.size(); i++) {
-                            if (i > 0) {
-                                sb.append(" · ");
-                            }
-                            sb.append(hits.get(i));
-                        }
-                    }
+                    updateDetail = detail.toString().trim();
+                    out = hits == 0 ? "已是最新" : ("有更新：" + hits + " 项");
                     out = sb.toString();
                 } catch (Throwable t) {
                     out = "检查失败，请检查网络";
