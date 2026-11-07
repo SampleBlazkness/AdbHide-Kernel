@@ -829,19 +829,26 @@ public class MainActivity extends Activity {
                         }
                     }
                     StringBuilder sb = new StringBuilder();
-                    sb.append("应用 ").append(appVer)
-                      .append(isNewer(tag, appVer) ? " → " + tag : " 已最新");
-                    if (kVer.isEmpty()) {
-                        sb.append(" · 内核 未安装");
-                    } else {
-                        sb.append(" · 内核 ").append(kVer)
-                          .append(isNewer(kLatest, kVer) ? " → " + kLatest : " 已最新");
+                    java.util.List<String> hits = new java.util.ArrayList<String>();
+                    if (isNewer(tag, appVer)) {
+                        hits.add("应用→" + tag);
                     }
-                    if (nVer.isEmpty()) {
-                        sb.append(" · Zygisk 未安装");
+                    if (!kVer.isEmpty() && isNewer(kLatest, kVer)) {
+                        hits.add("内核→" + kLatest);
+                    }
+                    if (!nVer.isEmpty() && isNewer(nLatest, nVer)) {
+                        hits.add("Zygisk→" + nLatest);
+                    }
+                    if (hits.isEmpty()) {
+                        sb.append("已是最新");
                     } else {
-                        sb.append(" · Zygisk ").append(nVer)
-                          .append(isNewer(nLatest, nVer) ? " → " + nLatest : " 已最新");
+                        sb.append("可更新：");
+                        for (int i = 0; i < hits.size(); i++) {
+                            if (i > 0) {
+                                sb.append("、");
+                            }
+                            sb.append(hits.get(i));
+                        }
                     }
                     out = sb.toString();
                 } catch (Throwable t) {
