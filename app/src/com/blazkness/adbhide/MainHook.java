@@ -172,6 +172,7 @@ public class MainHook implements IXposedHookLoadPackage {
     private static final String RECENTS_CONF = "/data/adb/adbhide/recents.conf";
     private static volatile Set<String> recentsPkgs = Collections.emptySet();
     private static volatile long recentsStamp = Long.MIN_VALUE;
+    private static long recentsLogAt = 0L;
 
     private static Set<String> recentsPackages() {
         File f = new File(RECENTS_CONF);
@@ -254,6 +255,10 @@ public class MainHook implements IXposedHookLoadPackage {
                         return;
                     }
                     List<?> list = (List<?>) res;
+                    if (!list.isEmpty() && System.currentTimeMillis() - recentsLogAt > 5000) {
+                        recentsLogAt = System.currentTimeMillis();
+                        XposedBridge.log(TAG + ": recents via " + param.method.getName() + " n=" + list.size());
+                    }
                     List<Object> keep = new ArrayList<>(list.size());
                     for (Object o : list) {
                         if (o == null) {
@@ -274,6 +279,58 @@ public class MainHook implements IXposedHookLoadPackage {
             }
         });
         XposedBridge.log(TAG + ": recents filter installed");
+
+        Class<?> atms;
+        try {
+            atms = Class.forName("com.android.server.wm.ActivityTaskManagerService", false, lp.classLoader);
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": ATMS not found: " + t);
+            return;
+        }
+        XC_MethodHook listHook = new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                try {
+                    Object res = param.getResult();
+                    if (!(res instanceof List)) {
+                        return;
+                    }
+                    Set<String> hide = recentsPackages();
+                    if (hide.isEmpty()) {
+                        return;
+                    }
+                    List<?> list = (List<?>) res;
+                    if (!list.isEmpty() && System.currentTimeMillis() - recentsLogAt > 5000) {
+                        recentsLogAt = System.currentTimeMillis();
+                        XposedBridge.log(TAG + ": recents via " + param.method.getName() + " n=" + list.size());
+                    }
+                    List<Object> keep = new ArrayList<>(list.size());
+                    for (Object o : list) {
+                        if (o == null) {
+                            continue;
+                        }
+                        String pkg = taskPackage(o);
+                        if (pkg != null && hide.contains(pkg)) {
+                            continue;
+                        }
+                        keep.add(o);
+                    }
+                    if (keep.size() != list.size()) {
+                        param.setResult(keep);
+                    }
+                } catch (Throwable t) {
+                    XposedBridge.log(TAG + ": recents filter failed: " + t);
+                }
+            }
+        };
+        for (java.lang.reflect.Method m : atms.getDeclaredMethods()) {
+            String n = m.getName();
+            if ((n.equals("getTasks") || n.equals("getRecentTasks") || n.equals("getFilteredTasks"))
+                    && List.class.isAssignableFrom(m.getReturnType())) {
+                XposedBridge.hookMethod(m, listHook);
+                XposedBridge.log(TAG + ": hooked ATMS." + n);
+            }
+        }
     }
 
     private boolean isSpoofedKey(String key) {
