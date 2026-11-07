@@ -644,8 +644,7 @@ public class MainActivity extends Activity {
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = r.readLine()) != null) {
-                sb.append(line).append('
-');
+                sb.append(line).append('\n');
             }
             r.close();
             p.waitFor();
