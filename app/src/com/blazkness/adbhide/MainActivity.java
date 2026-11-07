@@ -270,7 +270,9 @@ public class MainActivity extends Activity {
         updRow.setOrientation(LinearLayout.HORIZONTAL);
         updRow.setGravity(Gravity.CENTER_VERTICAL);
         updRow.setPadding(0, dp(10), 0, dp(2));
-        tvUpdate = Ui.sub(this, updateText);
+        tvUpdate = Ui.text(this, updateText, 11, Ui.MUTED);
+        tvUpdate.setMaxLines(1);
+        tvUpdate.setEllipsize(android.text.TextUtils.TruncateAt.END);
         updRow.addView(tvUpdate, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         TextView checkBtn = Ui.text(this, "检查更新", 13, Ui.ACCENT);
@@ -845,7 +847,7 @@ public class MainActivity extends Activity {
                         sb.append("可更新：");
                         for (int i = 0; i < hits.size(); i++) {
                             if (i > 0) {
-                                sb.append("、");
+                                sb.append(" · ");
                             }
                             sb.append(hits.get(i));
                         }
