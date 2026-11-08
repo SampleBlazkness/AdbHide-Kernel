@@ -41,29 +41,30 @@ the default blacklist to `/data/adb/adbhide/blacklist.conf`.
 
 It has only been loaded on a Redmi K90 (Android 16, kernel
 `6.6.77-android15-8-g4a507830d890-ab13636293-4k`, KernelSU 3.3.x). Modules for the other
-kernel lines have not been tested on a device. A mismatched kernel can leave the phone unable
-to boot, so make sure you can recover it first.
+kernel lines, and other root managers, have not been tested on a device. A mismatched kernel
+can leave the phone unable to boot, so make sure you can unbrick it first.
 
 Recovery order:
 
-1. Hold Volume Down while booting; KernelSU safe mode skips every module.
+1. Hold Volume Down while booting (on KernelSU) to enter safe mode, which disables every module.
 2. If the phone boots, disable the modules and reboot:
    ```bash
    su -c 'touch /data/adb/modules/adbhide_kmod/disable'
    su -c 'touch /data/adb/modules/adbhide_native/disable'
    ```
-3. Recovery or fastboot: remove the module directories, or flash the stock `boot` image.
+3. Recovery or Fastboot: remove the module directories, or flash the stock `boot` image.
 
 ## Usage
 
+- Property spoofing switches: the master switch and the three per-setting switches apply
+  immediately, no reboot needed.
 - Add or remove an app: in "Manage apps", tick or untick it. Saving writes
   `/data/adb/adbhide/blacklist.conf` and syncs to the kernel immediately, no reboot needed.
-  System apps are hidden from the list by default; the toggle at the top shows them.
-- Switches: the master switch and the three per-setting switches apply immediately, no reboot.
-  Apps that are already running need a restart before they read the new value.
-- Verify: the banners at the top report su, the kernel module and the Zygisk module; the
+  System apps are not listed by default; the toggle at the top shows them (this needs the app
+  list permission). Apps that are already running may need a restart to read the new settings.
+- Verify: the banners at the top report root, the kernel module and the Zygisk module; the
   "System properties" card reports whether the LSPosed layer was injected.
-- Uninstall: remove the app, uninstall both KernelSU modules, reboot.
+- Uninstall: remove the app, uninstall both modules, reboot.
 
 ## Known limitations
 
