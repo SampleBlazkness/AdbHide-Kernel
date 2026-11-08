@@ -8,15 +8,15 @@
    只有管理器已安装、且本次开机 LSPosed 层注入成功时才生效。
 3. **Zygisk 层**：在目标进程内替换属性内存映射，覆盖绕过 Java 层直接读属性文件的应用。
 
-> 下面的步骤按三层全装来写。三层可以分开装：只装 APK 就只有 LSPosed 层，应用读到的是未启用；
-> 再加内核模块才会隐藏 adbd 的 socket、端口和 `/proc/net`；再加 Zygisk 模块才能覆盖直接读属性文件的应用。
-> 内核模块依赖 LSPosed 层：本次开机注入没成功时，内核名单会被清空。
+> 三层可以只装一部分：只装 APK，应用读到的还是未启用；再加内核模块，才隐藏 adbd 的 socket、端口和
+> `/proc/net`；再加 Zygisk 模块，才覆盖直接读属性文件的应用。内核模块依赖 LSPosed 层，
+> 本次开机没注入成功，内核名单会被清空。
 
 ## 安装
 
-1. 执行 `uname -r`，按下表选择模块，在 KernelSU 里安装。
+1. 执行 `uname -r`，按下表选择模块，在 Root 管理器里安装。
 2. 安装 `AdbHide-native-v*.zip`，重启。
-3. 安装 `AdbHide-*.apk`，在 KernelSU 里授予 root，在 LSPosed 里启用 AdbHide，
+3. 安装 `AdbHide-*.apk`，在 Root 管理器里授予 root，在 LSPosed 里启用 AdbHide，
    作用域勾选「系统框架」；如果列表里还有「设置存储」，也一并勾选，再重启。
 4. 打开 AdbHide，点「管理应用」，勾选要隐藏的应用，保存即写入并同步到内核。
 

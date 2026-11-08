@@ -8,17 +8,16 @@ Manager (an LSPosed module), a kernel module and a Zygisk module, each covering 
 2. **Kernel layer**: hides adbd's socket, ports, `/proc/net` rows and properties from the apps on the list. It only runs when the manager is installed and the LSPosed layer was injected in this boot.
 3. **Zygisk layer**: replaces the property memory mapping inside target processes, covering apps that read the property file directly instead of going through the Java API.
 
-> The steps below assume all three layers. They can also be installed separately: the APK alone
-> gives the LSPosed layer, so apps see the settings as disabled; adding the kernel module hides
-> adbd's socket, ports and `/proc/net`; adding the Zygisk module also covers apps that read the
-> property file directly. The kernel module depends on the LSPosed layer: if injection did not
-> succeed in the current boot, the kernel list is cleared.
+> You can install the layers separately. The APK alone only changes what apps read; add the
+> kernel module to hide adbd's socket, ports and `/proc/net`; add the Zygisk module to cover
+> apps that read the property file directly. The kernel module depends on the LSPosed layer:
+> if injection fails in the current boot, the kernel list is cleared.
 
 ## Install
 
-1. Run `uname -r`, pick the module from the table below, install it in KernelSU.
+1. Run `uname -r`, pick the module from the table below, install it in your root manager.
 2. Install `AdbHide-native-v*.zip`, then reboot.
-3. Install `AdbHide-*.apk`, grant root in KernelSU, enable AdbHide in LSPosed with the system
+3. Install `AdbHide-*.apk`, grant root in your root manager, enable AdbHide in LSPosed with the system
    "System framework" scope, plus "Settings storage" if the list shows it, then reboot.
 4. Open AdbHide, tap "Manage apps", tick the apps to hide; saving writes and syncs immediately.
 
