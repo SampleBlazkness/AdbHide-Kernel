@@ -2,6 +2,11 @@
 
 [简体中文](README.md) | [English](README.en.md)
 
+> **Known issue (2026-11-08)**: wireless debugging is not fully hidden. The `_adb` mDNS
+> records are dropped, but adbd's random listener port is not blocked: an app on the list
+> can still find and connect to it by scanning localhost ports (only 5555 is rejected
+> today). Fix planned within a week.
+
 Manager (an LSPosed module), a kernel module and a Zygisk module, each covering one layer:
 
 1. **LSPosed layer**: developer options, USB debugging and wireless debugging are reported as disabled to every app. If the manager is missing or injection failed in this boot, the kernel and Zygisk layers stop working: the kernel list is cleared, `blacklist.conf` itself is kept.
