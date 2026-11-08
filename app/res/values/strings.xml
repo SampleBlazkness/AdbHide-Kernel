@@ -7,7 +7,7 @@
     <string name="opt_master">全局伪装</string>
     <string name="opt_master_desc">关闭后下面三项都不再伪造</string>
     <string name="opt_dev">开发者选项</string>
-    <string name="opt_adb">ADB 调试</string>
+    <string name="opt_adb">USB 调试</string>
     <string name="opt_wifi">无线调试</string>
     <string name="reads_format">本应用读到的值：adb=%1$s dev=%2$s wifi=%3$s</string>
     <string name="title_kernel">内核隐藏</string>
