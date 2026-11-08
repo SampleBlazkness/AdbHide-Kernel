@@ -4,30 +4,36 @@
 
 Manager (an LSPosed module), a kernel module and a Zygisk module, each covering one layer:
 
-1. **LSPosed layer**: developer options, ADB debugging and wireless debugging are reported as disabled to every app.
+1. **LSPosed layer**: developer options, USB debugging and wireless debugging are reported as disabled to every app.
 2. **Kernel layer**: hides adbd's socket, ports, `/proc/net` rows and properties from the apps on the list. It only runs when the manager is installed and the LSPosed layer was injected in this boot.
 3. **Zygisk layer**: replaces the property memory mapping inside target processes, covering apps that read the property file directly instead of going through the Java API.
+
+> The steps below assume all three layers. They can also be installed separately: the APK alone
+> gives the LSPosed layer, so apps see the settings as disabled; adding the kernel module hides
+> adbd's socket, ports and `/proc/net`; adding the Zygisk module also covers apps that read the
+> property file directly. The kernel module depends on the LSPosed layer: if injection did not
+> succeed in the current boot, the kernel list is cleared.
 
 ## Install
 
 1. Run `uname -r`, pick the module from the table below, install it in KernelSU.
 2. Install `AdbHide-native-v*.zip`, then reboot.
 3. Install `AdbHide-*.apk`, grant root in KernelSU, enable AdbHide in LSPosed with the system
-   framework and settings storage scopes (both selected by default), then reboot.
+   "System framework" scope (settings storage runs in the same process, no separate scope), then reboot.
 4. Open AdbHide, tap "Manage apps", tick the apps to hide; saving writes and syncs immediately.
 
 > The signing key changed in 1.4.0. You need to uninstall anything older before installing,
 > then set the LSPosed scope and KernelSU grant again.
 
-| Kernel line (`uname -r`) | Module to install                 |
-| ------------------------ | --------------------------------- |
-| `5.10.x-android12-*`     | `adbhide-kmod-android12-5.10.zip` |
-| `5.10.x-android13-*`     | `adbhide-kmod-android13-5.10.zip` |
-| `5.15.x-android13-*`     | `adbhide-kmod-android13-5.15.zip` |
-| `5.15.x-android14-*`     | `adbhide-kmod-android14-5.15.zip` |
-| `6.1.x-android14-*`      | `adbhide-kmod-android14-6.1.zip`  |
-| `6.6.x-android15-*`      | `adbhide-kmod-android15-6.6.zip`  |
-| `6.12.x-android16-*`     | `adbhide-kmod-android16-6.12.zip` |
+| Kernel line (`uname -r`) | Module to install                        |
+| ------------------------ | ---------------------------------------- |
+| `5.10.x-android12-*`     | `AdbHide-kmod-v1.2.6-android12-5.10.zip` |
+| `5.10.x-android13-*`     | `AdbHide-kmod-v1.2.6-android13-5.10.zip` |
+| `5.15.x-android13-*`     | `AdbHide-kmod-v1.2.6-android13-5.15.zip` |
+| `5.15.x-android14-*`     | `AdbHide-kmod-v1.2.6-android14-5.15.zip` |
+| `6.1.x-android14-*`      | `AdbHide-kmod-v1.2.6-android14-6.1.zip`  |
+| `6.6.x-android15-*`      | `AdbHide-kmod-v1.2.6-android15-6.6.zip`  |
+| `6.12.x-android16-*`     | `AdbHide-kmod-v1.2.6-android16-6.12.zip` |
 
 Pick the module by kernel version, not by the Android version. On first launch the app writes
 the default blacklist to `/data/adb/adbhide/blacklist.conf`.
