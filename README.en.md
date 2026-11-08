@@ -19,7 +19,7 @@ Manager (an LSPosed module), a kernel module and a Zygisk module, each covering 
 1. Run `uname -r`, pick the module from the table below, install it in KernelSU.
 2. Install `AdbHide-native-v*.zip`, then reboot.
 3. Install `AdbHide-*.apk`, grant root in KernelSU, enable AdbHide in LSPosed with the system
-   "System framework" scope (settings storage runs in the same process, no separate scope), then reboot.
+   "System framework" scope, plus "Settings storage" if the list shows it, then reboot.
 4. Open AdbHide, tap "Manage apps", tick the apps to hide; saving writes and syncs immediately.
 
 > The signing key changed in 1.4.0. You need to uninstall anything older before installing,
