@@ -3,31 +3,35 @@
 
 管理器（LSPosed 模块）、内核模块、Zygisk 模块，三层各管一部分：
 
-1. **LSPosed 层**：把应用读到的开发者模式、ADB 调试、无线调试改写成未启用，全局生效。
+1. **LSPosed 层**：把应用读到的开发者模式、USB 调试、无线调试的设置项改写成未启用，全局生效。
 2. **内核层**：对名单内的应用隐藏 adbd 的 socket、端口、`/proc/net` 记录与属性。
    只有管理器已安装、且本次开机 LSPosed 层注入成功时才生效。
 3. **Zygisk 层**：在目标进程内替换属性内存映射，覆盖绕过 Java 层直接读属性文件的应用。
+
+> 下面的步骤按三层全装来写。三层可以分开装：只装 APK 就只有 LSPosed 层，应用读到的是未启用；
+> 再加内核模块才会隐藏 adbd 的 socket、端口和 `/proc/net`；再加 Zygisk 模块才能覆盖直接读属性文件的应用。
+> 内核模块依赖 LSPosed 层：本次开机注入没成功时，内核名单会被清空。
 
 ## 安装
 
 1. 执行 `uname -r`，按下表选择模块，在 KernelSU 里安装。
 2. 安装 `AdbHide-native-v*.zip`，重启。
 3. 安装 `AdbHide-*.apk`，在 KernelSU 里授予 root，在 LSPosed 里启用 AdbHide，
-   作用域勾选系统框架与设置存储（默认已勾选），再重启。
+   作用域勾选「系统框架」（设置存储与它同进程，不需要单独勾选），再重启。
 4. 打开 AdbHide，点「管理应用」，勾选要隐藏的应用，保存即写入并同步到内核。
 
 > 1.3.1 及更早版本的签名与 1.4.0 不兼容。升级前需要先卸载旧版本，
 > 装好之后 LSPosed 作用域和 KernelSU 授权需要重新设置。
 
-| 内核版本（`uname -r`） | 要安装的模块名称                      |
-| ---------------------- | --------------------------------- |
-| `5.10.x-android12-*`   | `adbhide-kmod-android12-5.10.zip` |
-| `5.10.x-android13-*`   | `adbhide-kmod-android13-5.10.zip` |
-| `5.15.x-android13-*`   | `adbhide-kmod-android13-5.15.zip` |
-| `5.15.x-android14-*`   | `adbhide-kmod-android14-5.15.zip` |
-| `6.1.x-android14-*`    | `adbhide-kmod-android14-6.1.zip`  |
-| `6.6.x-android15-*`    | `adbhide-kmod-android15-6.6.zip`  |
-| `6.12.x-android16-*`   | `adbhide-kmod-android16-6.12.zip` |
+| 内核版本（`uname -r`） | 要安装的模块名称                         |
+| ---------------------- | ---------------------------------------- |
+| `5.10.x-android12-*`   | `AdbHide-kmod-v1.2.6-android12-5.10.zip` |
+| `5.10.x-android13-*`   | `AdbHide-kmod-v1.2.6-android13-5.10.zip` |
+| `5.15.x-android13-*`   | `AdbHide-kmod-v1.2.6-android13-5.15.zip` |
+| `5.15.x-android14-*`   | `AdbHide-kmod-v1.2.6-android14-5.15.zip` |
+| `6.1.x-android14-*`    | `AdbHide-kmod-v1.2.6-android14-6.1.zip`  |
+| `6.6.x-android15-*`    | `AdbHide-kmod-v1.2.6-android15-6.6.zip`  |
+| `6.12.x-android16-*`   | `AdbHide-kmod-v1.2.6-android16-6.12.zip` |
 
 按照内核版本选择刷入的模块，而不是按照安卓版本选择。首次打开应用会把默认黑名单写到
 `/data/adb/adbhide/blacklist.conf`。
