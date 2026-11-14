@@ -62,7 +62,7 @@ public class MainActivity extends Activity {
 
     private static final String[] DEFAULT_PKGS = {
             "com.eltavine.duckdetector",
-            "com.blazkness.wirelessdetector",
+            "com.blazkness.adbhidedetector",
     };
 
     private static final String PROPS = "/data/system/adbhide.props";

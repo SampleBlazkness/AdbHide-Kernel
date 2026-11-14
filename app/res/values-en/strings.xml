@@ -3,7 +3,7 @@
     <string name="state_active">Active</string>
     <string name="state_off">Off</string>
     <string name="state_inactive">Inactive</string>
-    <string name="title_system">System properties</string>
+    <string name="title_system">System settings</string>
     <string name="sub_lsposed">LSPosed layer, applies globally</string>
     <string name="opt_master">Global spoofing</string>
     <string name="opt_master_desc">Turning this off disables the three below</string>
