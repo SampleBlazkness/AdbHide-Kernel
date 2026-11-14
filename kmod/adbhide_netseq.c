@@ -98,6 +98,12 @@ static int diag_entry(struct kprobe *p, struct pt_regs *regs)
 	bool changed = false;
 
 	(void)p;
+	if (ssk && ssk->sk_protocol == 4) {
+		char b[24];
+
+		snprintf(b, sizeof(b), "p4-%u", (unsigned int)adbhide_uid_now());
+		adbhide_event_add("nl", b);
+	}
 	if (!adbhide_target_count())
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
