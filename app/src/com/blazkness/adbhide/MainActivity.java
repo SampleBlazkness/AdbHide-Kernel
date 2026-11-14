@@ -62,11 +62,7 @@ public class MainActivity extends Activity {
 
     private static final String[] DEFAULT_PKGS = {
             "com.eltavine.duckdetector",
-            "com.byxiaorun.detector",
-            "com.chunqiunativecheck",
-            "com.zhenxi.hunter",
-            "luna.safe.luna",
-            "com.aistudio.rootchecker.kxzqmr",
+            "com.blazkness.wirelessdetector",
     };
 
     private static final String PROPS = "/data/system/adbhide.props";
@@ -518,6 +514,7 @@ public class MainActivity extends Activity {
                 pending.put(key, isChecked ? "1" : "0");
                 pendingUntil = System.currentTimeMillis() + 2500L;
                 if ("master".equals(key)) {
+                    masterOn = isChecked;
                     applyEnabledState(isChecked);
                 }
                 saveProps(key, isChecked ? "1" : "0");
@@ -655,8 +652,10 @@ public class MainActivity extends Activity {
             }
         }
         tvSysState.setTextColor(st.masterOn && st.sysActive ? Ui.OK : Ui.BAD);
-        this.masterOn = st.masterOn;
-        setSwitch(swMaster, st.masterOn);
+        if (System.currentTimeMillis() >= pendingUntil) {
+            this.masterOn = st.masterOn;
+        }
+        setSwitch(swMaster, this.masterOn);
         applyEnabledState(st.masterOn);
         tvSysState.setBackground(Ui.bg(st.masterOn && st.sysActive ? 0xFFE9F7EF : 0xFFFDECEC, 999, this));
 
