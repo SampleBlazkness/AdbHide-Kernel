@@ -103,6 +103,7 @@ static int diag_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	d->hit = false;
 	d->skb = NULL;
 	d->saved = 0;
+	adbhide_event_add("diag", "entry");
 	if (!adbhide_target_count())
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
