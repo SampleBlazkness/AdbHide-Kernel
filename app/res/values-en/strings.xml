@@ -46,4 +46,8 @@
     <string name="save_sync">Save and sync</string>
     <string name="cancel">Cancel</string>
     <string name="mod_app">App</string>
+    <string name="mod_missing">Not installed</string>
+    <string name="mod_disabled">Disabled</string>
+    <string name="mod_enabled">Enabled</string>
+    <string name="mod_enabled_not_loaded">Enabled, not loaded</string>
 </resources>

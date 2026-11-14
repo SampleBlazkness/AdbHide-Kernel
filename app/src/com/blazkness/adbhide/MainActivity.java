@@ -33,6 +33,9 @@ public class MainActivity extends Activity {
 
     private static final String SCRIPT = "echo SU=1\np=/proc/adbhide_kmod\n" +
             "echo KMOD=$([ -r $p ] && echo 1 || echo 0)\n" +
+            "echo KMODINST=$([ -d /data/adb/modules/adbhide_kmod ] && echo 1 || echo 0)\n" +
+            "echo KMODDIS=$([ -f /data/adb/modules/adbhide_kmod/disable ] && echo 1 || echo 0)\n" +
+            "echo KMODVER=$(sed -n 's/^version=//p' /data/adb/modules/adbhide_kmod/module.prop 2>/dev/null)\n" +
             "if [ -r $p ]; then\n" +
             "  echo KVER=$(head -n1 $p | cut -d' ' -f2)\n" +
             "  echo KREDIR=$(sed -n 's/^redirect //p' $p)\n" +
@@ -40,6 +43,8 @@ public class MainActivity extends Activity {
             "  echo KCOUNTERS=$(sed -n 's/^counters //p' $p)\n" +
             "  echo KTARGETS=$(sed -n 's/^targets [0-9]*://p' $p)\n" +
             "fi\n" +
+            "echo NATIVEINST=$([ -d /data/adb/modules/adbhide_native ] && echo 1 || echo 0)\n" +
+            "echo NATIVEDIS=$([ -f /data/adb/modules/adbhide_native/disable ] && echo 1 || echo 0)\n" +
             "echo NATIVE=$([ -f /data/adb/modules/adbhide_native/zygisk/arm64-v8a.so ] && echo 1 || echo 0)\n" +
             "echo NATIVEVER=$(sed -n 's/^version=//p' /data/adb/modules/adbhide_native/module.prop 2>/dev/null)\n" +
             "echo UIDS=$(tr '\\n' ' ' < /data/adb/adbhide/uids.txt 2>/dev/null)\n" +
@@ -661,10 +666,33 @@ public class MainActivity extends Activity {
                     ? View.GONE : View.VISIBLE);
         }
 
-        tvKernel.setText(st.kmodOk ? "v" + st.kver : getString(R.string.not_loaded));
-        tvKernel.setTextColor(st.kmodOk ? Ui.OK : Ui.BAD);
-        tvNative.setText(st.nativeOk ? st.nativeVer : getString(R.string.not_loaded));
-        tvNative.setTextColor(st.nativeOk ? Ui.OK : Ui.BAD);
+        if (!st.kmodInst) {
+            tvKernel.setText(getString(R.string.mod_missing));
+            tvKernel.setTextColor(Ui.BAD);
+        } else if (st.kmodDis) {
+            tvKernel.setText(getString(R.string.mod_disabled) + (st.kver.isEmpty() ? "" : " · v" + st.kver));
+            tvKernel.setTextColor(Ui.WARN);
+        } else if (st.kmodOk) {
+            tvKernel.setText("v" + st.kver);
+            tvKernel.setTextColor(Ui.OK);
+        } else {
+            tvKernel.setText((st.kver.isEmpty() ? "" : "v" + st.kver + " · ") + getString(R.string.mod_enabled_not_loaded));
+            tvKernel.setTextColor(Ui.BAD);
+        }
+
+        if (!st.nativeInst) {
+            tvNative.setText(getString(R.string.mod_missing));
+            tvNative.setTextColor(Ui.BAD);
+        } else if (st.nativeDis) {
+            tvNative.setText(getString(R.string.mod_disabled) + (st.nativeVer.isEmpty() ? "" : " · " + st.nativeVer));
+            tvNative.setTextColor(Ui.WARN);
+        } else if (st.nativeOk) {
+            tvNative.setText(st.nativeVer + " · " + getString(R.string.mod_enabled));
+            tvNative.setTextColor(Ui.OK);
+        } else {
+            tvNative.setText(getString(R.string.mod_missing));
+            tvNative.setTextColor(Ui.BAD);
+        }
         tvApp.setText("v" + st.appVer);
 
         if (!st.kmodOk && st.error != null) {
@@ -911,8 +939,13 @@ public class MainActivity extends Activity {
 
         st.suOk = "1".equals(v.get("SU"));
         st.kmodOk = "1".equals(v.get("KMOD"));
+        st.kmodInst = "1".equals(v.get("KMODINST"));
+        st.kmodDis = "1".equals(v.get("KMODDIS"));
         st.nativeOk = "1".equals(v.get("NATIVE"));
+        st.nativeInst = "1".equals(v.get("NATIVEINST"));
+        st.nativeDis = "1".equals(v.get("NATIVEDIS"));
         st.kver = nz(v.get("KVER"));
+        if (st.kver.isEmpty()) st.kver = nz(v.get("KMODVER"));
         st.nativeVer = nz(v.get("NATIVEVER"));
         st.missing = confStats(st);
 
@@ -1004,7 +1037,11 @@ public class MainActivity extends Activity {
     private static final class State {
         boolean suOk;
         boolean kmodOk;
+        boolean kmodInst;
+        boolean kmodDis;
         boolean nativeOk;
+        boolean nativeInst;
+        boolean nativeDis;
         boolean sysActive;
         String kver = "";
         String nativeVer = "";
