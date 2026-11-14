@@ -103,7 +103,12 @@ static int diag_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	d->hit = false;
 	d->skb = NULL;
 	d->saved = 0;
-	adbhide_event_add("diag", "entry");
+	{
+		char b[24];
+
+		snprintf(b, sizeof(b), "e%u", skb ? skb->len : 0u);
+		adbhide_event_add("diag", b);
+	}
 	if (!adbhide_target_count())
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
@@ -125,6 +130,12 @@ static int diag_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 
 	if (!d->hit || !skb || (long)regs_return_value(regs) < 0)
 		return 0;
+	{
+		char b[24];
+
+		snprintf(b, sizeof(b), "r%u-%u", skb->len, d->saved);
+		adbhide_event_add("diag", b);
+	}
 	if (skb->len <= d->saved || skb->len > 262144)
 		return 0;
 
