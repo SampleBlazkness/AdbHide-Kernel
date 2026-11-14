@@ -12,7 +12,7 @@
     <string name="reads_format">本应用读到的值：adb=%1$s dev=%2$s wifi=%3$s</string>
     <string name="title_kernel">内核隐藏</string>
     <string name="manage_apps">管理应用</string>
-    <string name="summary_format">%1$d 个应用 · 文件 %2$d 行 · 生效 %3$d</string>
+    <string name="summary_format">%1$d 个应用 · %2$d 生效 · %3$d 无法解析</string>
     <string name="missing_title">未生效（包名不存在）</string>
     <string name="pkg_missing">包名不存在，未写入内核</string>
     <string name="list_empty">名单为空</string>
@@ -50,4 +50,14 @@
     <string name="mod_disabled">已禁用</string>
     <string name="mod_enabled">已启用</string>
     <string name="mod_enabled_not_loaded">已启用，未加载</string>
+    <string name="banner_kmod_disabled">内核模块已禁用，内核层隐藏关闭</string>
+    <string name="banner_zygisk_disabled">Native 模块已禁用，Zygisk 层隐藏关闭</string>
+    <string name="hint_kmod_disabled">内核模块已禁用：在内核模块管理器里启用后重启</string>
+    <string name="list_empty_inactive">名单为空 · LSPosed 层未生效，内核名单已清空</string>
+    <string name="banner_kmod_missing">内核模块未安装，内核层隐藏不可用</string>
+    <string name="banner_zygisk_missing">Native 模块未安装，Zygisk 层隐藏不可用</string>
+    <string name="pkg_inactive">已配置，未写入内核（LSPosed 层未生效）</string>
+    <string name="pkg_inactive_kernel">已配置，内核层未运行，未写入内核</string>
+    <string name="pkg_inactive_lsposed">已配置，LSPosed 层未生效，内核名单已清空</string>
+    <string name="hint_native_disabled">Native 模块已禁用：在内核模块管理器里启用后重启</string>
 </resources>

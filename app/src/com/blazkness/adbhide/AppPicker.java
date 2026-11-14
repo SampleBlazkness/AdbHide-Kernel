@@ -41,7 +41,7 @@ final class AppPicker {
     }
 
     static void show(final Activity activity, final Runnable onDone) {
-        final List<Entry> all = load(activity);
+        final List<Entry> all = new ArrayList<Entry>();
         final List<Entry> entries = new ArrayList<Entry>();
         for (Entry e : all) {
             if (!e.system) {
@@ -61,7 +61,7 @@ final class AppPicker {
                 Ui.dp(activity, 16), Ui.dp(activity, 4));
         root.addView(showSystem);
 
-        ListView list = new ListView(activity);
+        final ListView list = new ListView(activity);
         list.setAdapter(new BaseAdapter() {
             @Override
             public int getCount() {
@@ -122,6 +122,26 @@ final class AppPicker {
         });
         root.addView(list, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final List<Entry> loaded = load(activity);
+                activity.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        all.addAll(loaded);
+                        entries.clear();
+                        for (Entry e : all) {
+                            if (showSystem.isChecked() || !e.system) {
+                                entries.add(e);
+                            }
+                        }
+                        ((BaseAdapter) list.getAdapter()).notifyDataSetChanged();
+                    }
+                });
+            }
+        }).start();
 
         showSystem.setOnClickListener(new View.OnClickListener() {
             @Override
