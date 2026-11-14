@@ -64,8 +64,6 @@
 
 `AdbHide Detector`（`com.blazkness.adbhidedetector`）用于验证无线调试隐藏是否生效。实测 1.4.0 及更早的版本无法通过检测，1.4.15 可以通过。
 
-它是 Wireless Debug Detector 的新版，尚未发布，将随下一个 Release 发布；旧版 `WirelessDebugDetector-1.0.apk` 可在 1.4.15 的 Release 中找到。
-
 ## 已知限制
 
 - 一些无线调试功能受到影响：Shizuku 无法使用无线调试启动（不过都 ROOT 了，Shizuku 还用什么无线调试），无法使用扫码配对，AS 等 IDE 无法通过无线调试自动发现设备。手动执行 `adb pair` 和 `adb connect` 不受影响。
