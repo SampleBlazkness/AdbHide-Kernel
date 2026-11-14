@@ -71,53 +71,6 @@ static int ns_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 }
 
 
-/* ---------------------------------------------------- netlink diag 过滤 */
-
-/*
- * `ss` does not read /proc/net: it opens NETLINK_SOCK_DIAG and the kernel
- * builds the reply with inet_diag_dump_icsk(). The listener therefore stayed
- * visible even though every seq_file row was hidden. Roll the skb back over
- * the records whose local or peer port is the adbd port.
- */
-struct diag_data {
-	bool hit;
-};
-
-static int diag_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
-{
-	struct diag_data *d = (struct diag_data *)ri->data;
-
-	d->hit = false;
-	if (!adbhide_target_count())
-		return 0;
-	if (!adbhide_uid_is_target(adbhide_uid_now()))
-		return 0;
-	d->hit = true;
-	return 0;
-}
-
-/*
- * The reply is built inside the dump callback, so the buffered records cannot
- * be dropped from here. Refusing the dump keeps the listener out of `ss`
- * output entirely; the /proc/net tables are filtered separately.
- */
-static int diag_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
-{
-	struct diag_data *d = (struct diag_data *)ri->data;
-
-	if (d->hit && (long)regs_return_value(regs) >= 0)
-		regs_set_return_value(regs, -EPERM);
-	return 0;
-}
-
-static struct kretprobe diag_krp = {
-	.kp.symbol_name = "inet_diag_dump_icsk",
-	.entry_handler = diag_entry,
-	.handler = diag_ret,
-	.data_size = sizeof(struct diag_data),
-	.maxactive = 16,
-};
-
 static struct kretprobe tcp4_krp = {
 	.kp.symbol_name = "tcp4_seq_show",
 	.entry_handler = ns_entry,
@@ -140,9 +93,6 @@ int adbhide_netseq_init(void)
 {
 	int r4, r6;
 
-	r4 = register_kretprobe(&diag_krp);
-	if (r4)
-		pr_warn("adbhide_kmod: inet_diag probe failed: %d\n", r4);
 	r4 = register_kretprobe(&tcp4_krp);
 	r6 = register_kretprobe(&tcp6_krp);
 	if (r4)
@@ -161,8 +111,6 @@ void adbhide_netseq_exit(void)
 {
 	if (!netseq_active)
 		return;
-	if (diag_krp.kp.addr)
-		unregister_kretprobe(&diag_krp);
 	if (tcp4_krp.kp.addr)
 		unregister_kretprobe(&tcp4_krp);
 	if (tcp6_krp.kp.addr)
