@@ -27,7 +27,9 @@
 #define adbhide_vm_flags_set(vma, flags) ((vma)->vm_flags |= (flags))
 #endif
 
-#define ADBHIDE_KVER      "1.2.6"
+#ifndef ADBHIDE_KVER
+#define ADBHIDE_KVER      "unknown"
+#endif
 #define ADBHIDE_MAX_UIDS  64
 #define ADBHIDE_MAX_EVENTS 64
 
