@@ -287,53 +287,113 @@ static struct kretprobe getdents_krp = {
 	.maxactive = 32,
 };
 
-/* ---------------------------------------------------- sock_diag 套接字 */
+/* ---------------------------------------------------- /dev/socket 列表 */
 
 /*
- * `ss` reads its table from NETLINK_SOCK_DIAG, not from /proc/net. The reply is
- * assembled inside the dump callback, so the only reliable place to keep the
- * adbd listener out of it is to refuse the diag socket for target uids. The
- * /proc/net tables stay filtered, so a fallback reader still sees nothing.
+ * Hiding the inode alone leaves the "adbd" name in the getdents64 buffer, so a
+ * detector sees a name without a matching stat(). Denying the whole listing is
+ * a signal of its own, so drop just that record and keep the buffer otherwise
+ * untouched.
  */
-struct diag_sock_data {
+struct gd_data {
+	void __user *buf;
+	unsigned int count;
 	bool hit;
 };
 
-static int diag_sock_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
+static int gd_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
-	struct diag_sock_data *d = (struct diag_sock_data *)ri->data;
-	struct pt_regs *ur = (struct pt_regs *)regs_get_kernel_argument(regs, 0);
-	int family, protocol;
+	struct gd_data *d = (struct gd_data *)ri->data;
 
 	d->hit = false;
-	if (!ur || !adbhide_target_count())
+	d->buf = NULL;
+	d->count = 0;
+	if (!adbhide_target_count())
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
 		return 0;
-	family = (int)ur->regs[0];
-	protocol = (int)ur->regs[2];
-	if (family != 16 || protocol != 4)
-		return 0;
-	d->hit = true;
+	/* The arm64 syscall wrapper receives a pt_regs pointer, not the raw args. */
+	{
+		struct pt_regs *ur = (struct pt_regs *)regs_get_kernel_argument(regs, 0);
+
+		if (!ur)
+			return 0;
+		d->buf = (void __user *)ur->regs[1];
+		d->count = (unsigned int)ur->regs[2];
+	}
+	d->hit = d->buf && d->count >= 32 && d->count <= 262144;
+	if (d->hit)
+		adbhide_event_add("gd", "hit");
 	return 0;
 }
 
-static int diag_sock_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
+static int gd_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
-	struct diag_sock_data *d = (struct diag_sock_data *)ri->data;
+	struct gd_data *d = (struct gd_data *)ri->data;
+	long n = (long)regs_return_value(regs);
+	long off = 0, out = 0;
+	unsigned char *tmp;
+	bool changed = false;
 
-	if (d->hit && (long)regs_return_value(regs) >= 0)
-		regs_set_return_value(regs, -EACCES);
+	if (!d->hit || n <= 0 || (unsigned long)n > d->count)
+		return 0;
+
+	tmp = kmalloc(n, GFP_ATOMIC);
+	if (!tmp)
+		return 0;
+	{
+		unsigned long left;
+
+		pagefault_disable();
+		left = raw_copy_from_user(tmp, d->buf, n);
+		pagefault_enable();
+		if (left) {
+			kfree(tmp);
+			return 0;
+		}
+	}
+
+	while (off + 19 <= n) {
+		unsigned int reclen = tmp[off + 16] | (tmp[off + 17] << 8);
+		const char *name = (const char *)(tmp + off + 19);
+
+		if (reclen < 19 || off + reclen > n)
+			break;
+		if (!strcmp(name, "adbd")) {
+			changed = true;
+			off += reclen;
+			continue;
+		}
+		if (out != off)
+			memmove(tmp + out, tmp + off, reclen);
+		out += reclen;
+		off += reclen;
+	}
+	if (changed) {
+		unsigned long left;
+
+		pagefault_disable();
+		left = raw_copy_to_user(d->buf, tmp, out);
+		pagefault_enable();
+		if (!left) {
+			regs_set_return_value(regs, out);
+			adbhide_counter_bump(CNT_SOCK_HIDDEN);
+		}
+	}
+	kfree(tmp);
 	return 0;
 }
 
-static struct kretprobe diag_sock_krp = {
-	.kp.symbol_name = "__arm64_sys_socket",
-	.entry_handler = diag_sock_entry,
-	.handler = diag_sock_ret,
-	.data_size = sizeof(struct diag_sock_data),
-	.maxactive = 16,
+static struct kretprobe getdents_krp = {
+	.kp.symbol_name = "__arm64_sys_getdents64",
+	.entry_handler = gd_entry,
+	.handler = gd_ret,
+	.data_size = sizeof(struct gd_data),
+	.maxactive = 32,
 };
+
+/* ---------------------------------------------------- sock_diag 套接字 */
+
 
 /* ------------------------------------------------------------------ seq过滤 */
 
@@ -595,10 +655,6 @@ int adbhide_sockets_init(void)
 	r = register_kretprobe(&mod_seq_krp);
 	if (r)
 		pr_warn("adbhide_kmod: m_show probe failed: %d\n", r);
-	r = register_kretprobe(&diag_sock_krp);
-	if (r)
-		pr_warn("adbhide_kmod: socket probe failed: %d\n", r);
-
 	r = register_kretprobe(&getdents_krp);
 	if (r)
 		pr_warn("adbhide_kmod: getdents64 probe failed: %d\n", r);
@@ -632,8 +688,6 @@ void adbhide_sockets_exit(void)
 		unregister_kretprobe(&unix_seq_krp);
 	if (mod_seq_krp.kp.addr)
 		unregister_kretprobe(&mod_seq_krp);
-	if (diag_sock_krp.kp.addr)
-		unregister_kretprobe(&diag_sock_krp);
 	if (getdents_krp.kp.addr)
 		unregister_kretprobe(&getdents_krp);
 	if (stream_connect_krp.kp.addr)
