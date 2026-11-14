@@ -21,7 +21,7 @@
 #include "adbhide.h"
 
 static unsigned int adb_port = 5555;
-module_param(adb_port, uint, 0444);
+module_param(adb_port, uint, 0644);
 MODULE_PARM_DESC(adb_port, "TCP port used by adbd (5555 unless overridden)");
 
 struct ns_data {

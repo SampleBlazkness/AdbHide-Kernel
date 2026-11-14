@@ -17,3 +17,5 @@ libs/
 # local signing material never leaves this machine
 /.android/
 ci/
+local.properties
+.gradle/

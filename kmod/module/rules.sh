@@ -10,8 +10,20 @@ UIDS=/data/adb/adbhide/uids.txt
 
 [ -r "$UIDS" ] || { echo "$(date) rules: no uid file" >>"$LOG"; exit 0; }
 
-PORT=$(getprop service.adb.tcp.port 2>/dev/null)
-case "$PORT" in ''|*[!0-9]*) PORT=5555;; esac
+# Wireless debugging listens on a random port that never shows up in
+# service.adb.tcp.port, so ask the kernel who owns the listener.
+detect_port() {
+    _p=$(ss -ltnp 2>/dev/null | awk '$1 == "LISTEN" && /adbd/ {
+        n = split($4, a, ":"); print a[n]; exit }')
+    case "$_p" in ''|*[!0-9]*) _p="" ;; esac
+    [ -n "$_p" ] && { echo "$_p"; return; }
+    _p=$(getprop service.adb.tcp.port 2>/dev/null)
+    case "$_p" in ''|*[!0-9]*) _p=5555 ;; esac
+    echo "$_p"
+}
+PORT=$(detect_port)
+# keep the kernel-side /proc/net/tcp* filter on the same port
+[ -w /sys/module/adbhide_kmod/parameters/adb_port ] && echo "$PORT" > /sys/module/adbhide_kmod/parameters/adb_port 2>/dev/null
 WANT=$(( 2 * $(grep -c . "$UIDS") ))
 
 apply_family() {

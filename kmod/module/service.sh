@@ -17,3 +17,19 @@ mkdir -p /data/adb/adbhide
 } >>"$LOG"
 
 sh "$MODDIR/sync.sh"
+
+# Wireless debugging picks a new random port on every toggle. Re-apply the
+# netfilter rules when it changes so the REJECT follows it.
+(
+    LAST=""
+    while true; do
+        NOW=$(ss -ltnp 2>/dev/null | awk '$1 == "LISTEN" && /adbd/ {
+            n = split($4, a, ":"); print a[n]; exit }')
+        if [ -n "$NOW" ] && [ "$NOW" != "$LAST" ]; then
+            LAST="$NOW"
+            echo "$(date) portwatch: adbd port $NOW" >>"$LOG"
+            sh "$MODDIR/rules.sh"
+        fi
+        sleep 10
+    done
+) &

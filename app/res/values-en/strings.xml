@@ -12,7 +12,7 @@
     <string name="reads_format">Values read here: adb=%1$s dev=%2$s wifi=%3$s</string>
     <string name="title_kernel">Kernel hiding</string>
     <string name="manage_apps">Manage apps</string>
-    <string name="summary_format">%1$d apps · %2$d lines · %3$d active</string>
+    <string name="summary_format">%1$d app(s) · %2$d active · %3$d unresolved</string>
     <string name="missing_title">Not applied (package missing)</string>
     <string name="pkg_missing">Package not installed, not applied</string>
     <string name="list_empty">The list is empty</string>
@@ -50,4 +50,14 @@
     <string name="mod_disabled">Disabled</string>
     <string name="mod_enabled">Enabled</string>
     <string name="mod_enabled_not_loaded">Enabled, not loaded</string>
+    <string name="banner_kmod_disabled">Kernel module is disabled; kernel-layer hiding is off</string>
+    <string name="banner_zygisk_disabled">Native module is disabled; Zygisk-layer hiding is off</string>
+    <string name="hint_kmod_disabled">Kernel module is disabled: enable it in the root manager, then reboot</string>
+    <string name="list_empty_inactive">List empty: the LSPosed layer is inactive, kernel list cleared</string>
+    <string name="banner_kmod_missing">Kernel module not installed; kernel-layer hiding unavailable</string>
+    <string name="banner_zygisk_missing">Native module not installed; Zygisk-layer hiding unavailable</string>
+    <string name="pkg_inactive">Configured but not written to the kernel (LSPosed layer inactive)</string>
+    <string name="pkg_inactive_kernel">Configured but not written: kernel layer is not running</string>
+    <string name="pkg_inactive_lsposed">Configured but not written: LSPosed layer inactive, kernel list cleared</string>
+    <string name="hint_native_disabled">Native module is disabled: enable it in the root manager, then reboot</string>
 </resources>

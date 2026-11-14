@@ -48,14 +48,12 @@ public class MainActivity extends Activity {
             "echo NATIVE=$([ -f /data/adb/modules/adbhide_native/zygisk/arm64-v8a.so ] && echo 1 || echo 0)\n" +
             "echo NATIVEVER=$(sed -n 's/^version=//p' /data/adb/modules/adbhide_native/module.prop 2>/dev/null)\n" +
             "echo UIDS=$(tr '\\n' ' ' < /data/adb/adbhide/uids.txt 2>/dev/null)\n" +
+            "echo CONF=$(paste -sd'|' /data/adb/adbhide/blacklist.conf 2>/dev/null)\n" +
             "echo PORTS=$(iptables -S ADBHIDE_PORTS 2>/dev/null | grep -c uid-owner)\n" +
             "echo PORTS6=$(ip6tables -S ADBHIDE_PORTS 2>/dev/null | grep -c uid-owner)\n" +
             "echo MDNS=$(iptables -S ADBHIDE_MDNS_G 2>/dev/null | grep -c string)\n" +
             "echo MDNS6=$(ip6tables -S ADBHIDE_MDNS_G 2>/dev/null | grep -c string)\n" +
-            "for u in $(cat /data/adb/adbhide/uids.txt 2>/dev/null); do\n" +
-            "  n=$(pm list packages --uid $u 2>/dev/null | sed 's/package://; s/ uid:.*//' | head -n1)\n" +
-            "  echo PKG_$u=$n\n" +
-            "done\n";;
+            "";
 
     private static final String[] DEFAULT_PKGS = {
             "com.eltavine.duckdetector",
@@ -631,14 +629,26 @@ public class MainActivity extends Activity {
         tvSysState.setTextColor(st.sysActive ? Ui.OK : Ui.BAD);
         tvSysState.setBackground(Ui.bg(st.sysActive ? 0xFFE9F7EF : 0xFFFDECEC, 999, this));
 
-        tvListSummary.setText(getString(R.string.summary_format, st.uids.size(), st.confTotal, st.confResolved));
+        int unresolved = Math.max(0, st.confTotal - st.confResolved);
+        String summary = getString(R.string.summary_format, st.confTotal, st.uids.size(), unresolved);
+        if (!st.confPkgs.isEmpty() && st.uids.isEmpty()) {
+            summary += "\n" + getString((st.kmodDis || !st.kmodOk)
+                    ? R.string.pkg_inactive_kernel : R.string.pkg_inactive_lsposed);
+        }
+        tvListSummary.setText(summary);
 
         listBox.removeAllViews();
         for (int i = 0; i < st.uids.size(); i++) {
             listBox.addView(pkgRow(st.uids.get(i), st.pkgs.get(i), true));
         }
         if (st.uids.isEmpty()) {
-            listBox.addView(Ui.text(this, getString(R.string.list_empty), 13, Ui.MUTED));
+            if (!st.confPkgs.isEmpty()) {
+                for (String pkg : st.confPkgs) {
+                    listBox.addView(plainRow(pkg));
+                }
+            } else {
+                listBox.addView(Ui.text(this, getString(R.string.list_empty), 13, Ui.MUTED));
+            }
         }
 
         missingBox.removeAllViews();
@@ -653,13 +663,25 @@ public class MainActivity extends Activity {
                 addBanner(getString(R.string.banner_su),
                         0xFFB91C1C, 0xFFFEE2E2);
             } else {
-                if (!st.kmodOk) {
+                if (!st.kmodInst) {
+                    addBanner(getString(R.string.banner_kmod_missing),
+                            0xFFB91C1C, 0xFFFEE2E2);
+                } else if (st.kmodDis) {
+                    addBanner(getString(R.string.banner_kmod_disabled),
+                            0xFF92400E, 0xFFFEF3C7);
+                } else if (!st.kmodOk) {
                     addBanner(getString(R.string.banner_kmod),
-                            0xFF92400E, 0xFFFEF3C7);
+                            0xFFB91C1C, 0xFFFEE2E2);
                 }
-                if (!st.nativeOk) {
-                    addBanner(getString(R.string.banner_zygisk),
+                if (!st.nativeInst) {
+                    addBanner(getString(R.string.banner_zygisk_missing),
+                            0xFFB91C1C, 0xFFFEE2E2);
+                } else if (st.nativeDis) {
+                    addBanner(getString(R.string.banner_zygisk_disabled),
                             0xFF92400E, 0xFFFEF3C7);
+                } else if (!st.nativeOk) {
+                    addBanner(getString(R.string.banner_zygisk),
+                            0xFFB91C1C, 0xFFFEE2E2);
                 }
             }
             bannerBox.setVisibility(bannerBox.getChildCount() == 0
@@ -684,10 +706,10 @@ public class MainActivity extends Activity {
             tvNative.setText(getString(R.string.mod_missing));
             tvNative.setTextColor(Ui.BAD);
         } else if (st.nativeDis) {
-            tvNative.setText(getString(R.string.mod_disabled) + (st.nativeVer.isEmpty() ? "" : " · " + st.nativeVer));
+            tvNative.setText(getString(R.string.mod_disabled) + (st.nativeVer.isEmpty() ? "" : " · v" + st.nativeVer));
             tvNative.setTextColor(Ui.WARN);
         } else if (st.nativeOk) {
-            tvNative.setText(st.nativeVer + " · " + getString(R.string.mod_enabled));
+            tvNative.setText((st.nativeVer.isEmpty() ? "" : "v" + st.nativeVer + " · ") + getString(R.string.mod_enabled));
             tvNative.setTextColor(Ui.OK);
         } else {
             tvNative.setText(getString(R.string.mod_missing));
@@ -695,16 +717,62 @@ public class MainActivity extends Activity {
         }
         tvApp.setText("v" + st.appVer);
 
-        if (!st.kmodOk && st.error != null) {
-            hint.setText(getString(R.string.hint_no_state, String.valueOf(st.error)));
+        StringBuilder hintText = new StringBuilder();
+        if (!st.kmodInst) {
+            hintText.append(getString(R.string.hint_no_kmod));
+        } else if (st.kmodDis) {
+            hintText.append(getString(R.string.hint_kmod_disabled));
+        } else if (!st.kmodOk && st.error != null) {
+            hintText.append(getString(R.string.hint_no_state, String.valueOf(st.error)));
         } else if (!st.kmodOk) {
-            hint.setText(getString(R.string.hint_no_kmod));
-        } else {
-            hint.setText("");
+            hintText.append(getString(R.string.hint_no_kmod));
         }
+        if (st.nativeInst && st.nativeDis) {
+              if (hintText.length() > 0) hintText.append("\n");
+            hintText.append(getString(R.string.hint_native_disabled));
+        }
+        hint.setText(hintText.toString());
+    }
+
+    /** Configured entry that is not in the kernel list: no per-row status, no delete. */
+    private LinearLayout plainRow(String pkg) {
+        LinearLayout r = new LinearLayout(this);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setPadding(0, dp(7), 0, dp(7));
+
+        ImageView icon = new ImageView(this);
+        try {
+            icon.setImageDrawable(getPackageManager().getApplicationIcon(pkg));
+        } catch (Throwable ignored) {
+            icon.setImageDrawable(null);
+        }
+        LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dp(40), dp(40));
+        ip.rightMargin = dp(12);
+        r.addView(icon, ip);
+
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        String label = pkg;
+        try {
+            label = String.valueOf(getPackageManager()
+                    .getApplicationLabel(getPackageManager().getApplicationInfo(pkg, 0)));
+        } catch (Throwable ignored) {
+        }
+        texts.addView(Ui.text(this, label, 15, Ui.INK));
+        TextView pkgView = Ui.text(this, pkg, 11, Ui.MUTED);
+        pkgView.setTypeface(Typeface.MONOSPACE);
+        texts.addView(pkgView);
+        r.addView(texts, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        return r;
     }
 
     private LinearLayout pkgRow(String uid, String pkg, boolean active) {
+        return pkgRow(uid, pkg, active, R.string.pkg_missing);
+    }
+
+    private LinearLayout pkgRow(String uid, String pkg, boolean active, int inactiveRes) {
         LinearLayout r = new LinearLayout(this);
         r.setOrientation(LinearLayout.HORIZONTAL);
         r.setGravity(Gravity.CENTER_VERTICAL);
@@ -740,7 +808,7 @@ public class MainActivity extends Activity {
             TextView pkgView = Ui.text(this, pkg, 14, Ui.INK);
             pkgView.setTypeface(Typeface.MONOSPACE);
             texts.addView(pkgView);
-            texts.addView(Ui.text(this, getString(R.string.pkg_missing), 10, Ui.BAD));
+            texts.addView(Ui.text(this, getString(inactiveRes), 10, Ui.BAD));
         }
         r.addView(texts, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
@@ -944,10 +1012,9 @@ public class MainActivity extends Activity {
         st.nativeOk = "1".equals(v.get("NATIVE"));
         st.nativeInst = "1".equals(v.get("NATIVEINST"));
         st.nativeDis = "1".equals(v.get("NATIVEDIS"));
-        st.kver = nz(v.get("KVER"));
-        if (st.kver.isEmpty()) st.kver = nz(v.get("KMODVER"));
-        st.nativeVer = nz(v.get("NATIVEVER"));
-        st.missing = confStats(st);
+        st.kver = stripV(nz(v.get("KVER")));
+        if (st.kver.isEmpty()) st.kver = stripV(nz(v.get("KMODVER")));
+        st.nativeVer = stripV(nz(v.get("NATIVEVER")));
 
         String uidsRaw = nz(v.get("UIDS")).trim();
         if (!uidsRaw.isEmpty()) {
@@ -970,6 +1037,15 @@ public class MainActivity extends Activity {
             }
         }
 
+        String confRaw = nz(v.get("CONF")).trim();
+        if (!confRaw.isEmpty()) {
+            for (String c : confRaw.split(java.util.regex.Pattern.quote("|"))) {
+                if (!c.trim().isEmpty()) st.confPkgs.add(c.trim());
+            }
+        }
+
+        st.missing = confStats(st);
+
         int ports = num(v.get("PORTS"));
         int ports6 = num(v.get("PORTS6"));
         int mdns = num(v.get("MDNS")) + num(v.get("MDNS6"));
@@ -984,50 +1060,35 @@ public class MainActivity extends Activity {
         return st;
     }
 
-    /** Fills total/resolved and returns the packages that could not be resolved. */
+    /** Fills total/resolved from the parsed blacklist; no root round-trip. */
     private List<String> confStats(State st) {
         List<String> missing = new ArrayList<String>();
-        java.util.LinkedHashSet<Integer> uids = new java.util.LinkedHashSet<Integer>();
-        Process proc = null;
-        try {
-            proc = Runtime.getRuntime().exec(new String[]{"su", "-c",
-                    "cat /data/adb/adbhide/blacklist.conf"});
-            BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream()));
-            String line;
-            while ((line = r.readLine()) != null) {
-                line = line.trim();
-                if (line.isEmpty() || line.startsWith("#")) {
-                    continue;
-                }
-                st.confTotal++;
-                try {
-                    uids.add(getPackageManager().getPackageUid(line, 0));
-                } catch (Throwable t) {
-                    missing.add(line);
-                }
-            }
-            r.close();
-            proc.waitFor();
-        } catch (Throwable ignored) {
-        } finally {
-            if (proc != null) {
-                proc.destroy();
+        for (String pkg : st.confPkgs) {
+            st.confTotal++;
+            try {
+                getPackageManager().getPackageUid(pkg, 0);
+                st.confResolved++;
+            } catch (Throwable t) {
+                missing.add(pkg);
             }
         }
-        st.confResolved = uids.size();
         return missing;
-    }
-
-    private static int num(String s) {
-        try {
-            return s == null ? 0 : Integer.parseInt(s.trim());
-        } catch (Throwable t) {
-            return 0;
-        }
     }
 
     private static String nz(String s) {
         return s == null ? "" : s;
+    }
+
+    private static String stripV(String s) {
+        return s.startsWith("v") || s.startsWith("V") ? s.substring(1) : s;
+    }
+
+    private static int num(String s) {
+        try {
+            return Integer.parseInt(s.trim());
+        } catch (Throwable t) {
+            return 0;
+        }
     }
 
     private int dp(int value) {
@@ -1050,6 +1111,7 @@ public class MainActivity extends Activity {
         int confTotal;
         int confResolved;
         final List<String> uids = new ArrayList<String>();
+        final List<String> confPkgs = new ArrayList<String>();
         final List<String> pkgs = new ArrayList<String>();
         List<String> missing = new ArrayList<String>();
     }
