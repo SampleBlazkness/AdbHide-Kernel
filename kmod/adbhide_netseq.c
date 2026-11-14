@@ -80,11 +80,6 @@ static int ns_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
  * hands the skb to the caller, drop the records whose local or peer port is
  * the adbd port. Everything else in the reply stays untouched.
  */
-struct diag_data {
-	struct sk_buff *skb;
-	bool hit;
-};
-
 static unsigned int diag_sport(const unsigned char *msg)
 {
 	return ((unsigned int)msg[4] << 8) | msg[5];
@@ -95,16 +90,14 @@ static unsigned int diag_dport(const unsigned char *msg)
 	return ((unsigned int)msg[6] << 8) | msg[7];
 }
 
-static int diag_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
+static int diag_entry(struct kprobe *p, struct pt_regs *regs)
 {
-	struct diag_data *d = (struct diag_data *)ri->data;
 	struct sock *ssk = (struct sock *)regs_get_kernel_argument(regs, 0);
 	struct sk_buff *skb = (struct sk_buff *)regs_get_kernel_argument(regs, 1);
 	unsigned int off = 0, out = 0;
 	bool changed = false;
 
-	d->hit = false;
-	d->skb = NULL;
+	(void)p;
 	if (!adbhide_target_count())
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
