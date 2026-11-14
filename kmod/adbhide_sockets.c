@@ -526,8 +526,9 @@ void adbhide_sockets_exit(void)
 		unregister_kretprobe(&unix_seq_krp);
 	if (mod_seq_krp.kp.addr)
 		unregister_kretprobe(&mod_seq_krp);
-	if (stream_connect_krp.kp.addr)
+	if (iterate_dir_krp.kp.addr)
 		unregister_kretprobe(&iterate_dir_krp);
+	if (stream_connect_krp.kp.addr)
 		unregister_kretprobe(&stream_connect_krp);
 	if (dgram_connect_krp.kp.addr)
 		unregister_kretprobe(&dgram_connect_krp);
