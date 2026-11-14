@@ -207,8 +207,15 @@ static int gd_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
 		return 0;
-	d->buf = (void __user *)regs_get_kernel_argument(regs, 1);
-	d->count = (unsigned int)regs_get_kernel_argument(regs, 2);
+	/* The arm64 syscall wrapper receives a pt_regs pointer, not the raw args. */
+	{
+		struct pt_regs *ur = (struct pt_regs *)regs_get_kernel_argument(regs, 0);
+
+		if (!ur)
+			return 0;
+		d->buf = (void __user *)ur->regs[1];
+		d->count = (unsigned int)ur->regs[2];
+	}
 	d->hit = d->buf && d->count >= 32 && d->count <= 262144;
 	if (d->hit)
 		adbhide_event_add("gd", "hit");
