@@ -80,92 +80,33 @@ static int ns_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
  * the records whose local or peer port is the adbd port.
  */
 struct diag_data {
-	struct sk_buff *skb;
-	unsigned int saved;
 	bool hit;
 };
-
-static unsigned int diag_sport(const unsigned char *msg)
-{
-	return ((unsigned int)msg[4] << 8) | msg[5];
-}
-
-static unsigned int diag_dport(const unsigned char *msg)
-{
-	return ((unsigned int)msg[6] << 8) | msg[7];
-}
 
 static int diag_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 	struct diag_data *d = (struct diag_data *)ri->data;
-	struct sk_buff *skb = (struct sk_buff *)regs_get_kernel_argument(regs, 1);
 
 	d->hit = false;
-	d->skb = NULL;
-	d->saved = 0;
-	{
-		char b[24];
-
-		snprintf(b, sizeof(b), "e%u", skb ? skb->len : 0u);
-		adbhide_event_add("diag", b);
-	}
 	if (!adbhide_target_count())
 		return 0;
 	if (!adbhide_uid_is_target(adbhide_uid_now()))
 		return 0;
-	if (!skb || !skb->data)
-		return 0;
-	d->skb = skb;
-	d->saved = skb->len;
 	d->hit = true;
 	return 0;
 }
 
+/*
+ * The reply is built inside the dump callback, so the buffered records cannot
+ * be dropped from here. Refusing the dump keeps the listener out of `ss`
+ * output entirely; the /proc/net tables are filtered separately.
+ */
 static int diag_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 	struct diag_data *d = (struct diag_data *)ri->data;
-	struct sk_buff *skb = d->skb;
-	unsigned int off = d->saved, out = d->saved;
-	bool changed = false;
 
-	if (!d->hit || !skb || (long)regs_return_value(regs) < 0)
-		return 0;
-	{
-		char b[24];
-
-		snprintf(b, sizeof(b), "r%u-%u", skb->len, d->saved);
-		adbhide_event_add("diag", b);
-	}
-	if (skb->len <= d->saved || skb->len > 262144)
-		return 0;
-
-	while (off + 16 <= skb->len) {
-		struct nlmsghdr *nlh = (struct nlmsghdr *)(skb->data + off);
-		unsigned int len = nlh->nlmsg_len;
-		const unsigned char *msg;
-
-		if (len < 16 || off + len > skb->len)
-			break;
-		msg = (const unsigned char *)nlh + 16;
-		if (len >= 16 + 8 &&
-		    (diag_sport(msg) == (unsigned int)adb_port ||
-		     diag_dport(msg) == (unsigned int)adb_port)) {
-			changed = true;
-			off += len;
-			continue;
-		}
-		if (out != off && len)
-			memmove(skb->data + out, skb->data + off, len);
-		out += len;
-		off += len;
-	}
-
-	if (changed && out < skb->len) {
-		skb->len = out;
-		skb_set_tail_pointer(skb, out);
-		adbhide_counter_bump(CNT_NET_HIDDEN);
-		adbhide_event_add("netseq", "diag");
-	}
+	if (d->hit && (long)regs_return_value(regs) >= 0)
+		regs_set_return_value(regs, -EPERM);
 	return 0;
 }
 
