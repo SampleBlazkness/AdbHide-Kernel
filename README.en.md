@@ -21,13 +21,13 @@ Three modules: a manager (an LSPosed module), a kernel module and a Zygisk modul
 
 | Kernel version (`uname -r`) | Kernel module to install                  |
 | --------------------------- | ----------------------------------------- |
-| `5.10.x-android12-*`        | `AdbHide-kmod-v1.3.13-android12-5.10.zip` |
-| `5.10.x-android13-*`        | `AdbHide-kmod-v1.3.13-android13-5.10.zip` |
-| `5.15.x-android13-*`        | `AdbHide-kmod-v1.3.13-android13-5.15.zip` |
-| `5.15.x-android14-*`        | `AdbHide-kmod-v1.3.13-android14-5.15.zip` |
-| `6.1.x-android14-*`         | `AdbHide-kmod-v1.3.13-android14-6.1.zip`  |
-| `6.6.x-android15-*`         | `AdbHide-kmod-v1.3.13-android15-6.6.zip`  |
-| `6.12.x-android16-*`        | `AdbHide-kmod-v1.3.13-android16-6.12.zip` |
+| `5.10.x-android12-*`        | `AdbHide-kmod-v1.3.14-android12-5.10.zip` |
+| `5.10.x-android13-*`        | `AdbHide-kmod-v1.3.14-android13-5.10.zip` |
+| `5.15.x-android13-*`        | `AdbHide-kmod-v1.3.14-android13-5.15.zip` |
+| `5.15.x-android14-*`        | `AdbHide-kmod-v1.3.14-android14-5.15.zip` |
+| `6.1.x-android14-*`         | `AdbHide-kmod-v1.3.14-android14-6.1.zip`  |
+| `6.6.x-android15-*`         | `AdbHide-kmod-v1.3.14-android15-6.6.zip`  |
+| `6.12.x-android16-*`        | `AdbHide-kmod-v1.3.14-android16-6.12.zip` |
 
 Pick the module by kernel version, not by Android version. The first launch writes the default blacklist (Duck Detector, AdbHide Detector).
 
