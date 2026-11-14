@@ -457,6 +457,25 @@ public class MainActivity extends Activity {
         return value;
     }
 
+    /** One format for every row: version first, then the same status words. */
+    private void setModuleState(TextView view, String version, boolean installed,
+                                boolean disabled, boolean loaded) {
+        String v = version == null || version.isEmpty() ? "" : "v" + version + " · ";
+        if (!installed) {
+            view.setText(v + getString(R.string.mod_missing));
+            view.setTextColor(Ui.BAD);
+        } else if (disabled) {
+            view.setText(v + getString(R.string.mod_disabled));
+            view.setTextColor(Ui.WARN);
+        } else if (loaded) {
+            view.setText(v + getString(R.string.mod_enabled));
+            view.setTextColor(Ui.OK);
+        } else {
+            view.setText(v + getString(R.string.mod_enabled_not_loaded));
+            view.setTextColor(Ui.BAD);
+        }
+    }
+
     private LinearLayout row(String label, String sub, View right) {
         LinearLayout r = new LinearLayout(this);
         r.setOrientation(LinearLayout.HORIZONTAL);
@@ -688,34 +707,10 @@ public class MainActivity extends Activity {
                     ? View.GONE : View.VISIBLE);
         }
 
-        if (!st.kmodInst) {
-            tvKernel.setText(getString(R.string.mod_missing));
-            tvKernel.setTextColor(Ui.BAD);
-        } else if (st.kmodDis) {
-            tvKernel.setText(getString(R.string.mod_disabled) + (st.kver.isEmpty() ? "" : " · v" + st.kver));
-            tvKernel.setTextColor(Ui.WARN);
-        } else if (st.kmodOk) {
-            tvKernel.setText("v" + st.kver);
-            tvKernel.setTextColor(Ui.OK);
-        } else {
-            tvKernel.setText((st.kver.isEmpty() ? "" : "v" + st.kver + " · ") + getString(R.string.mod_enabled_not_loaded));
-            tvKernel.setTextColor(Ui.BAD);
-        }
-
-        if (!st.nativeInst) {
-            tvNative.setText(getString(R.string.mod_missing));
-            tvNative.setTextColor(Ui.BAD);
-        } else if (st.nativeDis) {
-            tvNative.setText(getString(R.string.mod_disabled) + (st.nativeVer.isEmpty() ? "" : " · v" + st.nativeVer));
-            tvNative.setTextColor(Ui.WARN);
-        } else if (st.nativeOk) {
-            tvNative.setText((st.nativeVer.isEmpty() ? "" : "v" + st.nativeVer + " · ") + getString(R.string.mod_enabled));
-            tvNative.setTextColor(Ui.OK);
-        } else {
-            tvNative.setText(getString(R.string.mod_missing));
-            tvNative.setTextColor(Ui.BAD);
-        }
-        tvApp.setText("v" + st.appVer);
+        setModuleState(tvKernel, st.kver, st.kmodInst, st.kmodDis, st.kmodOk);
+        setModuleState(tvNative, st.nativeVer, st.nativeInst, st.nativeDis, st.nativeOk);
+        tvApp.setText("v" + st.appVer + " · " + getString(R.string.mod_installed));
+        tvApp.setTextColor(Ui.OK);
 
         StringBuilder hintText = new StringBuilder();
         if (!st.kmodInst) {
@@ -1012,8 +1007,8 @@ public class MainActivity extends Activity {
         st.nativeOk = "1".equals(v.get("NATIVE"));
         st.nativeInst = "1".equals(v.get("NATIVEINST"));
         st.nativeDis = "1".equals(v.get("NATIVEDIS"));
-        st.kver = stripV(nz(v.get("KVER")));
-        if (st.kver.isEmpty()) st.kver = stripV(nz(v.get("KMODVER")));
+        st.kver = stripV(nz(v.get("KMODVER")));
+        if (st.kver.isEmpty()) st.kver = stripV(nz(v.get("KVER")));
         st.nativeVer = stripV(nz(v.get("NATIVEVER")));
 
         String uidsRaw = nz(v.get("UIDS")).trim();

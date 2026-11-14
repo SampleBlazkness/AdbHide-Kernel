@@ -179,6 +179,60 @@ static struct kretprobe inode_permission_krp = {
 	.maxactive = 64,
 };
 
+/* ------------------------------------------------------ /dev/socket 目录 */
+
+/*
+ * hiding stat()/open() alone leaves "adbd" in the getdents() listing, and a
+ * detector that compares the listing with the failed stat() calls that an
+ * uninterpretable result. Hide the listing itself for target uids so both
+ * observations agree: no entry, no inode.
+ */
+struct dir_data {
+	bool hit;
+};
+
+static int iterate_dir_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct dir_data *d = (struct dir_data *)ri->data;
+	struct file *file = (struct file *)regs_get_kernel_argument(regs, 0);
+	struct dentry *de;
+
+	d->hit = false;
+	if (!adbhide_target_count())
+		return 0;
+	if (!adbhide_uid_is_target(adbhide_uid_now()))
+		return 0;
+	if (!file || !file->f_path.dentry)
+		return 0;
+	de = file->f_path.dentry;
+	if (!name_is(de->d_name.name, de->d_name.len, "socket"))
+		return 0;
+	if (!de->d_parent || !name_is(de->d_parent->d_name.name,
+				     de->d_parent->d_name.len, "dev"))
+		return 0;
+	d->hit = true;
+	return 0;
+}
+
+static int iterate_dir_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct dir_data *d = (struct dir_data *)ri->data;
+
+	if (d->hit && (long)regs_return_value(regs) >= 0) {
+		regs_set_return_value(regs, -EACCES);
+		adbhide_event_add("sock", "dir");
+	}
+	return 0;
+}
+
+static struct kretprobe iterate_dir_krp = {
+	.kp.symbol_name = "iterate_dir",
+	.entry_handler = iterate_dir_entry,
+	.handler = iterate_dir_ret,
+	.data_size = sizeof(struct dir_data),
+	.maxactive = 32,
+};
+
 /* ------------------------------------------------------------------ seq过滤 */
 
 struct seq_data {
@@ -439,6 +493,11 @@ int adbhide_sockets_init(void)
 	r = register_kretprobe(&mod_seq_krp);
 	if (r)
 		pr_warn("adbhide_kmod: m_show probe failed: %d\n", r);
+	r = register_kretprobe(&iterate_dir_krp);
+	if (r)
+		pr_warn("adbhide: iterate_dir kretprobe failed: %d
+", r);
+
 	r = register_kretprobe(&stream_connect_krp);
 	if (r)
 		pr_warn("adbhide_kmod: unix_stream_connect probe failed: %d\n", r);
@@ -469,6 +528,7 @@ void adbhide_sockets_exit(void)
 	if (mod_seq_krp.kp.addr)
 		unregister_kretprobe(&mod_seq_krp);
 	if (stream_connect_krp.kp.addr)
+		unregister_kretprobe(&iterate_dir_krp);
 		unregister_kretprobe(&stream_connect_krp);
 	if (dgram_connect_krp.kp.addr)
 		unregister_kretprobe(&dgram_connect_krp);
