@@ -10,8 +10,8 @@ android {
         applicationId "com.blazkness.adbhide"
         minSdk 26
         targetSdk 36
-        versionCode 52
-        versionName "1.4.12"
+        versionCode 53
+        versionName "1.4.13"
         multiDexEnabled false
     }
 
