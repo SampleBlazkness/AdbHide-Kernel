@@ -21,13 +21,13 @@
 
 | 内核版本（`uname -r`） | 要安装的内核模块名称                      |
 | ---------------------- | ----------------------------------------- |
-| `5.10.x-android12-*`   | `AdbHide-kmod-v1.3.13-android12-5.10.zip` |
-| `5.10.x-android13-*`   | `AdbHide-kmod-v1.3.13-android13-5.10.zip` |
-| `5.15.x-android13-*`   | `AdbHide-kmod-v1.3.13-android13-5.15.zip` |
-| `5.15.x-android14-*`   | `AdbHide-kmod-v1.3.13-android14-5.15.zip` |
-| `6.1.x-android14-*`    | `AdbHide-kmod-v1.3.13-android14-6.1.zip`  |
-| `6.6.x-android15-*`    | `AdbHide-kmod-v1.3.13-android15-6.6.zip`  |
-| `6.12.x-android16-*`   | `AdbHide-kmod-v1.3.13-android16-6.12.zip` |
+| `5.10.x-android12-*`   | `AdbHide-kmod-v1.3.14-android12-5.10.zip` |
+| `5.10.x-android13-*`   | `AdbHide-kmod-v1.3.14-android13-5.10.zip` |
+| `5.15.x-android13-*`   | `AdbHide-kmod-v1.3.14-android13-5.15.zip` |
+| `5.15.x-android14-*`   | `AdbHide-kmod-v1.3.14-android14-5.15.zip` |
+| `6.1.x-android14-*`    | `AdbHide-kmod-v1.3.14-android14-6.1.zip`  |
+| `6.6.x-android15-*`    | `AdbHide-kmod-v1.3.14-android15-6.6.zip`  |
+| `6.12.x-android16-*`   | `AdbHide-kmod-v1.3.14-android16-6.12.zip` |
 
 按照内核版本选择刷入的模块，而不是按照安卓版本选择。首次打开应用写入默认黑名单（Duck Detector、AdbHide Detector）。
 
