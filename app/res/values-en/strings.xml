@@ -49,6 +49,7 @@
     <string name="mod_missing">Not installed</string>
     <string name="mod_disabled">Disabled</string>
     <string name="mod_enabled">Enabled</string>
+    <string name="mod_installed">Installed</string>
     <string name="mod_enabled_not_loaded">Enabled, not loaded</string>
     <string name="banner_kmod_disabled">Kernel module is disabled; kernel-layer hiding is off</string>
     <string name="banner_zygisk_disabled">Native module is disabled; Zygisk-layer hiding is off</string>

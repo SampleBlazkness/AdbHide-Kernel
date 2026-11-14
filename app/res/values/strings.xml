@@ -49,6 +49,7 @@
     <string name="mod_missing">未安装</string>
     <string name="mod_disabled">已禁用</string>
     <string name="mod_enabled">已启用</string>
+    <string name="mod_installed">已安装</string>
     <string name="mod_enabled_not_loaded">已启用，未加载</string>
     <string name="banner_kmod_disabled">内核模块已禁用，内核层隐藏关闭</string>
     <string name="banner_zygisk_disabled">Native 模块已禁用，Zygisk 层隐藏关闭</string>
