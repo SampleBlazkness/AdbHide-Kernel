@@ -495,7 +495,7 @@ int adbhide_sockets_init(void)
 		pr_warn("adbhide_kmod: m_show probe failed: %d\n", r);
 	r = register_kretprobe(&iterate_dir_krp);
 	if (r)
-		pr_warn("adbhide: iterate_dir kretprobe failed: %d
+		pr_warn("adbhide_kmod: iterate_dir probe failed: %d
 ", r);
 
 	r = register_kretprobe(&stream_connect_krp);
