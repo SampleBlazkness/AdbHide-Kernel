@@ -18,6 +18,7 @@ final class Ui {
     static final int ACCENT = 0xFF2563EB;
     static final int OK = 0xFF16A34A;
     static final int BAD = 0xFFDC2626;
+    static final int WARN = 0xFFB45309;
     static final int LINE = 0xFFE8EAED;
 
     private Ui() {
