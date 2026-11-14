@@ -71,91 +71,6 @@ static int ns_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
 }
 
 
-/* ---------------------------------------------------- netlink diag 过滤 */
-
-/*
- * `ss` asks the kernel over NETLINK_SOCK_DIAG instead of reading /proc/net,
- * so the seq_file filtering above never sees it. Denying the socket would be
- * an anomaly of its own, so filter the reply: just before netlink_unicast()
- * hands the skb to the caller, drop the records whose local or peer port is
- * the adbd port. Everything else in the reply stays untouched.
- */
-static unsigned int diag_sport(const unsigned char *msg)
-{
-	return ((unsigned int)msg[4] << 8) | msg[5];
-}
-
-static unsigned int diag_dport(const unsigned char *msg)
-{
-	return ((unsigned int)msg[6] << 8) | msg[7];
-}
-
-static int diag_entry(struct kprobe *p, struct pt_regs *regs)
-{
-	struct sock *ssk = (struct sock *)regs_get_kernel_argument(regs, 0);
-	struct sk_buff *skb = (struct sk_buff *)regs_get_kernel_argument(regs, 1);
-	unsigned int off = 0, out = 0;
-	bool changed = false;
-
-	(void)p;
-	if (ssk && ssk->sk_protocol == 4) {
-		char b[24];
-
-		if (skb && skb->data && skb->len >= 24) {
-			struct nlmsghdr *nlh = (struct nlmsghdr *)skb->data;
-			const unsigned char *m = (const unsigned char *)nlh + 16;
-
-			snprintf(b, sizeof(b), "u%u-L%u-T%u-S%u", (unsigned int)adbhide_uid_now(),
-				 skb->len, nlh->nlmsg_type, diag_sport(m));
-		} else {
-			snprintf(b, sizeof(b), "u%u-L%u", (unsigned int)adbhide_uid_now(),
-				 skb ? skb->len : 0u);
-		}
-		adbhide_event_add("nl", b);
-	}
-	if (!adbhide_target_count())
-		return 0;
-	if (!adbhide_uid_is_target(adbhide_uid_now()))
-		return 0;
-	if (!ssk || ssk->sk_protocol != 4)
-		return 0;
-	if (!skb || !skb->data || skb->len < 24 || skb->len > 262144)
-		return 0;
-
-	while (off + 16 <= skb->len) {
-		struct nlmsghdr *nlh = (struct nlmsghdr *)(skb->data + off);
-		unsigned int len = nlh->nlmsg_len;
-		const unsigned char *msg;
-
-		if (len < 16 || off + len > skb->len)
-			break;
-		msg = (const unsigned char *)nlh + 16;
-		if (nlh->nlmsg_type == 20 && len >= 24 &&
-		    (diag_sport(msg) == (unsigned int)adb_port ||
-		     diag_dport(msg) == (unsigned int)adb_port)) {
-			changed = true;
-			off += len;
-			continue;
-		}
-		if (out != off)
-			memmove(skb->data + out, skb->data + off, len);
-		out += len;
-		off += len;
-	}
-	if (changed && out < skb->len) {
-		skb->len = out;
-		skb_set_tail_pointer(skb, out);
-		adbhide_counter_bump(CNT_NET_HIDDEN);
-		adbhide_event_add("netseq", "diag");
-	}
-	return 0;
-}
-
-static struct kprobe diag_kp = {
-	.symbol_name = "netlink_unicast",
-	.pre_handler = diag_entry,
-};
-
 static struct kretprobe tcp4_krp = {
 	.kp.symbol_name = "tcp4_seq_show",
 	.entry_handler = ns_entry,
@@ -178,9 +93,6 @@ int adbhide_netseq_init(void)
 {
 	int r4, r6;
 
-	r4 = register_kprobe(&diag_kp);
-	if (r4)
-		pr_warn("adbhide_kmod: netlink_unicast probe failed: %d\n", r4);
 	r4 = register_kretprobe(&tcp4_krp);
 	r6 = register_kretprobe(&tcp6_krp);
 	if (r4)
@@ -199,8 +111,6 @@ void adbhide_netseq_exit(void)
 {
 	if (!netseq_active)
 		return;
-	if (diag_kp.addr)
-		unregister_kprobe(&diag_kp);
 	if (tcp4_krp.kp.addr)
 		unregister_kretprobe(&tcp4_krp);
 	if (tcp6_krp.kp.addr)
