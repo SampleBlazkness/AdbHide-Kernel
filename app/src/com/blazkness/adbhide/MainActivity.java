@@ -49,6 +49,11 @@ public class MainActivity extends Activity {
             "echo NATIVEVER=$(sed -n 's/^version=//p' /data/adb/modules/adbhide_native/module.prop 2>/dev/null)\n" +
             "echo UIDS=$(tr '\\n' ' ' < /data/adb/adbhide/uids.txt 2>/dev/null)\n" +
             "echo CONF=$(paste -sd'|' /data/adb/adbhide/blacklist.conf 2>/dev/null)\n" +
+            "pf=/data/system/adbhide.props\n" +
+            "echo MASTER=$(sed -n 's/^master=//p' $pf 2>/dev/null)\n" +
+            "echo DEV=$(sed -n 's/^dev=//p' $pf 2>/dev/null)\n" +
+            "echo SWADB=$(sed -n 's/^adb=//p' $pf 2>/dev/null)\n" +
+            "echo SWWIFI=$(sed -n 's/^wifi=//p' $pf 2>/dev/null)\n" +
             "echo PORTS=$(iptables -S ADBHIDE_PORTS 2>/dev/null | grep -c uid-owner)\n" +
             "echo PORTS6=$(ip6tables -S ADBHIDE_PORTS 2>/dev/null | grep -c uid-owner)\n" +
             "echo MDNS=$(iptables -S ADBHIDE_MDNS_G 2>/dev/null | grep -c string)\n" +
@@ -77,6 +82,7 @@ public class MainActivity extends Activity {
 
     private final java.util.Map<String, String> pending = new java.util.HashMap<String, String>();
     private long pendingUntil = 0L;
+    private volatile boolean masterOn = true;
 
     private final Handler ticker = new Handler(Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
@@ -157,7 +163,7 @@ public class MainActivity extends Activity {
             pending.clear();
         }
         binding = true;
-        setSwitch(swMaster, !"0".equals(props.get("master")));
+        setSwitch(swMaster, masterOn);
         setSwitch(swDev, !"0".equals(props.get("dev")));
         setSwitch(swAdb, !"0".equals(props.get("adb")));
         setSwitch(swWifi, !"0".equals(props.get("wifi")));
@@ -165,9 +171,11 @@ public class MainActivity extends Activity {
         applyEnabledState(swMaster.isChecked());
 
         boolean alive = "1".equals(callGlobal("adbhide_hook_probe"));
-        tvSysState.setText(alive ? getString(R.string.state_active) : getString(R.string.state_inactive));
-        tvSysState.setTextColor(alive ? Ui.OK : Ui.BAD);
-        tvSysState.setBackground(Ui.bg(alive ? 0xFFE9F7EF : 0xFFFDECEC, 999, this));
+        boolean master = this.masterOn;
+        tvSysState.setText(!master ? getString(R.string.state_off)
+                : alive ? getString(R.string.state_active) : getString(R.string.state_inactive));
+        tvSysState.setTextColor(master && alive ? Ui.OK : Ui.BAD);
+        tvSysState.setBackground(Ui.bg(master && alive ? 0xFFE9F7EF : 0xFFFDECEC, 999, this));
         if (tvUpdate != null) {
             tvUpdate.setText(updateText);
         }
@@ -633,7 +641,8 @@ public class MainActivity extends Activity {
         binding = false;
         applyEnabledState(swMaster.isChecked());
 
-        tvSysState.setText(st.sysActive ? getString(R.string.state_active) : getString(R.string.state_inactive));
+        tvSysState.setText(!st.masterOn ? getString(R.string.state_off)
+                : st.sysActive ? getString(R.string.state_active) : getString(R.string.state_inactive));
         if (tvReads != null) {
             try {
                 int a = Settings.Global.getInt(getContentResolver(), "adb_enabled", -1);
@@ -645,8 +654,11 @@ public class MainActivity extends Activity {
                 tvReads.setText(getString(R.string.read_failed));
             }
         }
-        tvSysState.setTextColor(st.sysActive ? Ui.OK : Ui.BAD);
-        tvSysState.setBackground(Ui.bg(st.sysActive ? 0xFFE9F7EF : 0xFFFDECEC, 999, this));
+        tvSysState.setTextColor(st.masterOn && st.sysActive ? Ui.OK : Ui.BAD);
+        this.masterOn = st.masterOn;
+        setSwitch(swMaster, st.masterOn);
+        applyEnabledState(st.masterOn);
+        tvSysState.setBackground(Ui.bg(st.masterOn && st.sysActive ? 0xFFE9F7EF : 0xFFFDECEC, 999, this));
 
         int unresolved = Math.max(0, st.confTotal - st.confResolved);
         String summary = getString(R.string.summary_format, st.confTotal, st.uids.size(), unresolved);
@@ -1044,7 +1056,10 @@ public class MainActivity extends Activity {
         int ports = num(v.get("PORTS"));
         int ports6 = num(v.get("PORTS6"));
         int mdns = num(v.get("MDNS")) + num(v.get("MDNS6"));
-        st.sysActive = hookAlive()
+        String masterRaw = nz(v.get("MASTER")).trim();
+        if (masterRaw.isEmpty()) masterRaw = nz(props.get("master")).trim();
+        st.masterOn = !"0".equals(masterRaw);
+        st.sysActive = st.masterOn && hookAlive()
                 && ports6 >= st.uids.size() * 2;
 
         try {
@@ -1099,6 +1114,7 @@ public class MainActivity extends Activity {
         boolean nativeInst;
         boolean nativeDis;
         boolean sysActive;
+        boolean masterOn;
         String kver = "";
         String nativeVer = "";
         String appVer = "";

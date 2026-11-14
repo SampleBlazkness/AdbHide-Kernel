@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="state_active">Active</string>
+    <string name="state_off">Off</string>
     <string name="state_inactive">Inactive</string>
     <string name="title_system">System properties</string>
     <string name="sub_lsposed">LSPosed layer, applies globally</string>

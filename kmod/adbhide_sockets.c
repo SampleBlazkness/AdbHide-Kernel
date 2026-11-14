@@ -31,13 +31,14 @@
 #include <linux/jiffies.h>
 #include <linux/net.h>
 #include <linux/string.h>
+#include <linux/uaccess.h>
+#include <linux/slab.h>
+#include <asm/page.h>
 #include <net/sock.h>
 #include "adbhide.h"
 
 static unsigned long adbd_ino;
 static struct super_block *adbd_sb;
-static unsigned long sockdir_ino;
-static struct super_block *sockdir_sb;
 static struct delayed_work adbd_resolve_work;
 
 static bool name_is(const char *s, size_t len, const char *want)
@@ -140,7 +141,6 @@ static struct kretprobe vfs_statx_krp = {
  * inode only. */
 struct perm_data {
 	bool hit;
-	bool dir;
 };
 
 static int inode_permission_entry(struct kretprobe_instance *ri,
@@ -148,23 +148,11 @@ static int inode_permission_entry(struct kretprobe_instance *ri,
 {
 	struct perm_data *d = (struct perm_data *)ri->data;
 	struct inode *inode = (struct inode *)regs_get_kernel_argument(regs, 1);
-	int mask = (int)regs_get_kernel_argument(regs, 2);
 
 	d->hit = false;
-	d->dir = false;
-	if (!inode)
+	if (!adbd_ino || !inode)
 		return 0;
 	if (!adbhide_target_count() || !adbhide_uid_is_target(adbhide_uid_now()))
-		return 0;
-	/* Listing /dev/socket must fail the same way the hidden inode does,
-	 * otherwise the listing and the ENOENT stat contradict each other. */
-	if (sockdir_ino && inode->i_ino == sockdir_ino && (mask & 4) &&
-	    (!sockdir_sb || inode->i_sb == sockdir_sb)) {
-		d->hit = true;
-		d->dir = true;
-		return 0;
-	}
-	if (!adbd_ino)
 		return 0;
 	if (!S_ISSOCK(inode->i_mode) || inode->i_ino != adbd_ino)
 		return 0;
@@ -179,12 +167,7 @@ static int inode_permission_ret(struct kretprobe_instance *ri,
 {
 	struct perm_data *d = (struct perm_data *)ri->data;
 
-	if (!d->hit)
-		return 0;
-	if (d->dir) {
-		if ((long)regs_return_value(regs) == 0)
-			regs_set_return_value(regs, -EACCES);
-	} else if ((long)regs_return_value(regs) == -EACCES) {
+	if (d->hit && (long)regs_return_value(regs) == -EACCES) {
 		regs_set_return_value(regs, -ENOENT);
 		adbhide_counter_bump(CNT_SOCK_HIDDEN);
 	}
@@ -197,6 +180,86 @@ static struct kretprobe inode_permission_krp = {
 	.handler = inode_permission_ret,
 	.data_size = sizeof(struct perm_data),
 	.maxactive = 64,
+};
+
+/* ---------------------------------------------------- /dev/socket 列表 */
+
+/*
+ * Hiding the inode alone leaves the "adbd" name in the getdents64 buffer, so a
+ * detector sees a name without a matching stat(). Denying the whole listing is
+ * a signal of its own, so drop just that record and keep the buffer otherwise
+ * untouched.
+ */
+struct gd_data {
+	void __user *buf;
+	unsigned int count;
+	bool hit;
+};
+
+static int gd_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct gd_data *d = (struct gd_data *)ri->data;
+
+	d->hit = false;
+	d->buf = NULL;
+	d->count = 0;
+	if (!adbhide_target_count())
+		return 0;
+	if (!adbhide_uid_is_target(adbhide_uid_now()))
+		return 0;
+	d->buf = (void __user *)regs_get_kernel_argument(regs, 1);
+	d->count = (unsigned int)regs_get_kernel_argument(regs, 2);
+	d->hit = d->buf && d->count >= 32 && d->count <= 262144;
+	return 0;
+}
+
+static int gd_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct gd_data *d = (struct gd_data *)ri->data;
+	long n = (long)regs_return_value(regs);
+	long off = 0, out = 0;
+	unsigned char *tmp;
+	bool changed = false;
+
+	if (!d->hit || n <= 0 || (unsigned long)n > d->count)
+		return 0;
+
+	tmp = kmalloc(n, GFP_ATOMIC);
+	if (!tmp)
+		return 0;
+	if (copy_from_user(tmp, d->buf, n)) {
+		kfree(tmp);
+		return 0;
+	}
+
+	while (off + 19 <= n) {
+		unsigned int reclen = tmp[off + 16] | (tmp[off + 17] << 8);
+		const char *name = (const char *)(tmp + off + 19);
+
+		if (reclen < 19 || off + reclen > n)
+			break;
+		if (!strcmp(name, "adbd")) {
+			changed = true;
+			off += reclen;
+			continue;
+		}
+		if (out != off)
+			memmove(tmp + out, tmp + off, reclen);
+		out += reclen;
+		off += reclen;
+	}
+	if (changed && !copy_to_user(d->buf, tmp, out))
+		regs_set_return_value(regs, out);
+	kfree(tmp);
+	return 0;
+}
+
+static struct kretprobe getdents_krp = {
+	.kp.symbol_name = "__arm64_sys_getdents64",
+	.entry_handler = gd_entry,
+	.handler = gd_ret,
+	.data_size = sizeof(struct gd_data),
+	.maxactive = 32,
 };
 
 /* ------------------------------------------------------------------ seq过滤 */
@@ -417,16 +480,6 @@ static void adbd_resolve(struct work_struct *w)
 	static int tries;
 	struct path p;
 
-	if (!kern_path("/dev/socket", LOOKUP_DIRECTORY, &p)) {
-		struct inode *dir = d_backing_inode(p.dentry);
-
-		if (dir) {
-			sockdir_ino = dir->i_ino;
-			sockdir_sb = dir->i_sb;
-		}
-		path_put(&p);
-	}
-
 	if (!kern_path("/dev/socket/adbd", LOOKUP_FOLLOW, &p)) {
 		struct inode *inode = d_backing_inode(p.dentry);
 
@@ -469,6 +522,10 @@ int adbhide_sockets_init(void)
 	r = register_kretprobe(&mod_seq_krp);
 	if (r)
 		pr_warn("adbhide_kmod: m_show probe failed: %d\n", r);
+	r = register_kretprobe(&getdents_krp);
+	if (r)
+		pr_warn("adbhide_kmod: getdents64 probe failed: %d\n", r);
+
 	r = register_kretprobe(&stream_connect_krp);
 	if (r)
 		pr_warn("adbhide_kmod: unix_stream_connect probe failed: %d\n", r);
@@ -498,6 +555,8 @@ void adbhide_sockets_exit(void)
 		unregister_kretprobe(&unix_seq_krp);
 	if (mod_seq_krp.kp.addr)
 		unregister_kretprobe(&mod_seq_krp);
+	if (getdents_krp.kp.addr)
+		unregister_kretprobe(&getdents_krp);
 	if (stream_connect_krp.kp.addr)
 		unregister_kretprobe(&stream_connect_krp);
 	if (dgram_connect_krp.kp.addr)
