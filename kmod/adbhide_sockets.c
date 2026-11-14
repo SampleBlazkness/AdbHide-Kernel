@@ -287,6 +287,54 @@ static struct kretprobe getdents_krp = {
 	.maxactive = 32,
 };
 
+/* ---------------------------------------------------- sock_diag 套接字 */
+
+/*
+ * `ss` reads its table from NETLINK_SOCK_DIAG, not from /proc/net. The reply is
+ * assembled inside the dump callback, so the only reliable place to keep the
+ * adbd listener out of it is to refuse the diag socket for target uids. The
+ * /proc/net tables stay filtered, so a fallback reader still sees nothing.
+ */
+struct diag_sock_data {
+	bool hit;
+};
+
+static int diag_sock_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct diag_sock_data *d = (struct diag_sock_data *)ri->data;
+	struct pt_regs *ur = (struct pt_regs *)regs_get_kernel_argument(regs, 0);
+	int family, protocol;
+
+	d->hit = false;
+	if (!ur || !adbhide_target_count())
+		return 0;
+	if (!adbhide_uid_is_target(adbhide_uid_now()))
+		return 0;
+	family = (int)ur->regs[0];
+	protocol = (int)ur->regs[2];
+	if (family != 16 || protocol != 4)
+		return 0;
+	d->hit = true;
+	return 0;
+}
+
+static int diag_sock_ret(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+	struct diag_sock_data *d = (struct diag_sock_data *)ri->data;
+
+	if (d->hit && (long)regs_return_value(regs) >= 0)
+		regs_set_return_value(regs, -EACCES);
+	return 0;
+}
+
+static struct kretprobe diag_sock_krp = {
+	.kp.symbol_name = "__arm64_sys_socket",
+	.entry_handler = diag_sock_entry,
+	.handler = diag_sock_ret,
+	.data_size = sizeof(struct diag_sock_data),
+	.maxactive = 16,
+};
+
 /* ------------------------------------------------------------------ seq过滤 */
 
 struct seq_data {
@@ -547,6 +595,10 @@ int adbhide_sockets_init(void)
 	r = register_kretprobe(&mod_seq_krp);
 	if (r)
 		pr_warn("adbhide_kmod: m_show probe failed: %d\n", r);
+	r = register_kretprobe(&diag_sock_krp);
+	if (r)
+		pr_warn("adbhide_kmod: socket probe failed: %d\n", r);
+
 	r = register_kretprobe(&getdents_krp);
 	if (r)
 		pr_warn("adbhide_kmod: getdents64 probe failed: %d\n", r);
@@ -580,6 +632,8 @@ void adbhide_sockets_exit(void)
 		unregister_kretprobe(&unix_seq_krp);
 	if (mod_seq_krp.kp.addr)
 		unregister_kretprobe(&mod_seq_krp);
+	if (diag_sock_krp.kp.addr)
+		unregister_kretprobe(&diag_sock_krp);
 	if (getdents_krp.kp.addr)
 		unregister_kretprobe(&getdents_krp);
 	if (stream_connect_krp.kp.addr)
