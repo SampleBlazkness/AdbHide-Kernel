@@ -101,7 +101,16 @@ static int diag_entry(struct kprobe *p, struct pt_regs *regs)
 	if (ssk && ssk->sk_protocol == 4) {
 		char b[24];
 
-		snprintf(b, sizeof(b), "p4-%u", (unsigned int)adbhide_uid_now());
+		if (skb && skb->data && skb->len >= 24) {
+			struct nlmsghdr *nlh = (struct nlmsghdr *)skb->data;
+			const unsigned char *m = (const unsigned char *)nlh + 16;
+
+			snprintf(b, sizeof(b), "u%u-L%u-T%u-S%u", (unsigned int)adbhide_uid_now(),
+				 skb->len, nlh->nlmsg_type, diag_sport(m));
+		} else {
+			snprintf(b, sizeof(b), "u%u-L%u", (unsigned int)adbhide_uid_now(),
+				 skb ? skb->len : 0u);
+		}
 		adbhide_event_add("nl", b);
 	}
 	if (!adbhide_target_count())
