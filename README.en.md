@@ -17,7 +17,7 @@ Three modules: a manager (an LSPosed module), a kernel module and a Zygisk modul
 5. Open AdbHide, tap "Manage apps", tick the apps you want to hide, then save; it takes effect immediately.
 
 > Steps 1, 2 and 3 can be done in any order.
-> Installing only the manager, to spoof system settings and nothing else, out of fear of bricking the device, is not recommended: other modules already do more at the pure LSPosed level, for example DuckUSB and 「我不是开发者」.
+> Installing only the manager, to spoof system settings and nothing else, out of fear of bricking the device, is not recommended: other modules already do more at the pure LSPosed level, for example DuckUSB and 「我不是开发者」. But in my testing, neither of them passes Duck Detector.
 
 | Kernel version (`uname -r`) | Kernel module to install                  |
 | --------------------------- | ----------------------------------------- |
