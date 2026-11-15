@@ -55,7 +55,7 @@ int adbhide_parse_targets(const char *spec)
 			continue;
 		if (kstrtou32(tok, 10, &v))
 			continue;
-		if (v < 10000 || v > 99999)
+		if (v < 10000 || v > 1999999)
 			continue;
 		list[n++] = v;
 	}
