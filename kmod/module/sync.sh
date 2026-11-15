@@ -24,9 +24,11 @@ if [ -r "$CONF" ]; then
         case "$line" in ''|'#'*) continue;; esac
         pkg=$(echo "$line" | tr -d ' \r')
         [ -n "$pkg" ] || continue
-        uid=$(echo "$PM_LIST" | sed -n "s/^package:$pkg uid:\([0-9]*\)$/\1/p" | head -n1)
-        if [ -n "$uid" ]; then
-            LIST="${LIST}${LIST:+,}$uid"
+        uids=$(echo "$PM_LIST" | sed -n "s/^package:$pkg uid:\([0-9,]*\)$/\\1/p" | head -n1)
+        if [ -n "$uids" ]; then
+            for u in $(echo "$uids" | tr ',' ' '); do
+                LIST="${LIST}${LIST:+,}$u"
+            done
         else
             echo "$(date) sync: package not installed: $pkg" >>"$LOG"
         fi
