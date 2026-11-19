@@ -1,0 +1,10 @@
+build/
+*.o
+*.a
+*.so
+# 测试密钥，绝不入库
+adb_keys
+hostkey.txt
+hostkey.pub
+*.pem
+*.key
