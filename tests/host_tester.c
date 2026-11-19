@@ -1,7 +1,8 @@
 /* adbng - SPDX-License-Identifier: MIT
  *
  * Minimal ADB *host* used to test usbgwd without a PC: it drives the protocol
- * over a socketpair, so the whole handshake runs inside the phone.
+ * over a socketpair, so the whole handshake plus every service runs inside the
+ * phone.
  *
  * usage: host_tester <usbgwd-path> <adb_keys> <hostkey.txt> [bad]
  */
@@ -12,6 +13,7 @@
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +23,30 @@
 
 static int g_fd = -1;
 static uint32_t g_next_id = 1;
+static int g_pass, g_total;
+static char g_reason[256];
+static char g_why[256];
+
+struct rx {
+    uint32_t cmd, a0, a1, len;
+    unsigned char *data;
+};
+
+struct chan {
+    uint32_t my_id;
+    uint32_t dev_id;
+};
+
+struct sink {
+    unsigned char *out;
+    size_t outlen, outcap;
+    unsigned char *err;
+    size_t errlen, errcap;
+    int exit_code;
+    int have_exit;
+    int closed;
+    int wretes;
+};
 
 static void send_msg(uint32_t cmd, uint32_t a0, uint32_t a1, const void *data, size_t len)
 {
@@ -36,13 +62,11 @@ static void send_msg(uint32_t cmd, uint32_t a0, uint32_t a1, const void *data, s
     if (len) io_write_full(g_fd, data, len);
 }
 
-/* returns 1 on a message, 0 on clean EOF, -1 on error/timeout */
-static int recv_msg(uint32_t *cmd, uint32_t *a0, uint32_t *a1, unsigned char **data,
-                    uint32_t *len, int timeout_ms)
+/* 1 on message, 0 on clean EOF, -1 on error/timeout */
+static int recv_msg(struct rx *r, int timeout_ms)
 {
     struct pollfd p = { .fd = g_fd, .events = POLLIN };
-    int pr = poll(&p, 1, timeout_ms);
-    if (pr <= 0) return -1;
+    if (poll(&p, 1, timeout_ms) <= 0) return -1;
 
     struct amessage m;
     if (io_read_full(g_fd, &m, AMSG_SIZE) != 0) return 0;
@@ -57,14 +81,29 @@ static int recv_msg(uint32_t *cmd, uint32_t *a0, uint32_t *a1, unsigned char **d
         if (io_read_full(g_fd, buf, m.data_length) != 0) { free(buf); return 0; }
         buf[m.data_length] = 0;
     }
-    *cmd = m.command;
-    *a0 = m.arg0;
-    *a1 = m.arg1;
-    *data = buf;
-    *len = m.data_length;
+    r->cmd = m.command;
+    r->a0 = m.arg0;
+    r->a1 = m.arg1;
+    r->len = m.data_length;
+    r->data = buf;
     printf("[host] <- %-4s arg0=%u arg1=%u len=%u\n", amsg_name(m.command), m.arg0, m.arg1,
            m.data_length);
     return 1;
+}
+
+static int buf_add(unsigned char **buf, size_t *len, size_t *cap, const void *d, size_t n)
+{
+    if (*len + n > *cap) {
+        size_t c = *cap ? *cap : 4096;
+        while (c < *len + n) c *= 2;
+        unsigned char *nb = realloc(*buf, c);
+        if (!nb) return -1;
+        *buf = nb;
+        *cap = c;
+    }
+    memcpy(*buf + *len, d, n);
+    *len += n;
+    return 0;
 }
 
 static int load_hostkey(const char *path, uint32_t n[RSA_LIMBS], uint32_t d[RSA_LIMBS])
@@ -86,13 +125,317 @@ static int load_hostkey(const char *path, uint32_t n[RSA_LIMBS], uint32_t d[RSA_
     return (have_n && have_d) ? 0 : -1;
 }
 
+static int open_service(const char *svc, size_t len, struct chan *ch)
+{
+    ch->my_id = g_next_id++;
+    send_msg(A_OPEN, ch->my_id, 0, svc, len);
+
+    struct rx r;
+    if (recv_msg(&r, 20000) != 1) return -1;
+    if (r.cmd == A_CLSE) { free(r.data); return -2; }   /* refused */
+    if (r.cmd != A_OKAY) { free(r.data); return -1; }
+    ch->dev_id = r.a0;
+    free(r.data);
+    return 0;
+}
+
+/* Read until CLSE, acking every WRTE so the device's flow control keeps
+ * moving.  In v2 mode the WRTE payload is a stream of sub-packets. */
+static int pump(struct chan *ch, struct sink *s, int v2, int timeout_ms)
+{
+    for (;;) {
+        struct rx r;
+        int rc = recv_msg(&r, timeout_ms);
+        if (rc <= 0) { snprintf(g_why, sizeof g_why, "link lost while waiting (%d)", rc); return -1; }
+        if (r.cmd == A_OKAY) { free(r.data); continue; }
+        if (r.cmd == A_CLSE) { free(r.data); s->closed = 1; return 0; }
+        if (r.cmd != A_WRTE) { free(r.data); continue; }
+
+        send_msg(A_OKAY, ch->my_id, ch->dev_id, NULL, 0);   /* grant next WRTE */
+        s->wretes++;
+
+        if (!v2) {
+            if (r.len && buf_add(&s->out, &s->outlen, &s->outcap, r.data, r.len) != 0) {
+                free(r.data);
+                return -1;
+            }
+            free(r.data);
+            continue;
+        }
+
+        size_t off = 0;
+        while (off + 5 <= r.len) {
+            int stream = r.data[off];
+            uint32_t l = (uint32_t)r.data[off + 1] | ((uint32_t)r.data[off + 2] << 8) |
+                         ((uint32_t)r.data[off + 3] << 16) | ((uint32_t)r.data[off + 4] << 24);
+            off += 5;
+            if (off + l > r.len) {
+                free(r.data);
+                snprintf(g_why, sizeof g_why, "truncated sub-packet");
+                return -1;
+            }
+            if (stream == 1) {
+                if (buf_add(&s->out, &s->outlen, &s->outcap, r.data + off, l) != 0) { free(r.data); return -1; }
+            } else if (stream == 2) {
+                if (buf_add(&s->err, &s->errlen, &s->errcap, r.data + off, l) != 0) { free(r.data); return -1; }
+            } else if (stream == 3) {
+                if (l != 4) {
+                    free(r.data);
+                    snprintf(g_why, sizeof g_why, "bad exit sub-packet length %u", l);
+                    return -1;
+                }
+                s->exit_code = (int)((uint32_t)r.data[off] | ((uint32_t)r.data[off + 1] << 8) |
+                                     ((uint32_t)r.data[off + 2] << 16) |
+                                     ((uint32_t)r.data[off + 3] << 24));
+                s->have_exit = 1;
+            }
+            off += l;
+        }
+        free(r.data);
+    }
+}
+
+static void sink_free(struct sink *s)
+{
+    free(s->out);
+    free(s->err);
+    memset(s, 0, sizeof *s);
+}
+
+#define CHECK(cond, ...)                                    \
+    do {                                                    \
+        if (!(cond)) {                                      \
+            snprintf(g_reason, sizeof g_reason, __VA_ARGS__); \
+            goto fail;                                      \
+        }                                                   \
+    } while (0)
+
+static int case_shell_v1(void)
+{
+    struct chan ch;
+    struct sink s;
+    memset(&s, 0, sizeof s);
+
+    const char svc[] = "shell:echo hello-v1";
+    int rc = open_service(svc, sizeof svc, &ch);
+    CHECK(rc == 0, "open failed rc=%d", rc);
+    CHECK(pump(&ch, &s, 0, 20000) == 0, "%s", g_why);
+
+    CHECK(s.outlen > 0, "no stdout");
+    CHECK(memmem(s.out, s.outlen, "hello-v1", 8) != NULL, "stdout missing 'hello-v1': %.*s",
+          (int)s.outlen, s.out ? (char *)s.out : "");
+    CHECK(s.closed, "channel not closed");
+    sink_free(&s);
+    return 0;
+fail:
+    sink_free(&s);
+    return -1;
+}
+
+static int case_shell_v2(void)
+{
+    struct chan ch;
+    struct sink s;
+    memset(&s, 0, sizeof s);
+
+    const char svc[] = "shell,v2,raw:echo out; echo err1 >&2; exit 7";
+    int rc = open_service(svc, sizeof svc, &ch);
+    CHECK(rc == 0, "open failed rc=%d", rc);
+    CHECK(pump(&ch, &s, 1, 20000) == 0, "%s", g_why);
+
+    CHECK(s.outlen == 4 && !memcmp(s.out, "out\n", 4), "stdout wrong: %.*s", (int)s.outlen,
+          s.out ? (char *)s.out : "");
+    CHECK(s.errlen == 5 && !memcmp(s.err, "err1\n", 5), "stderr wrong: %.*s", (int)s.errlen,
+          s.err ? (char *)s.err : "");
+    CHECK(s.have_exit && s.exit_code == 7, "exit code %d (had=%d)", s.exit_code, s.have_exit);
+    CHECK(s.closed, "channel not closed");
+    sink_free(&s);
+    return 0;
+fail:
+    sink_free(&s);
+    return -1;
+}
+
+static int case_big_output(void)
+{
+    struct chan ch;
+    struct sink s;
+    memset(&s, 0, sizeof s);
+
+    const char svc[] = "shell,v2,raw:head -c 300000 /dev/zero | tr '\\0' 'x'";
+    int rc = open_service(svc, sizeof svc, &ch);
+    CHECK(rc == 0, "open failed rc=%d", rc);
+    CHECK(pump(&ch, &s, 1, 60000) == 0, "%s", g_why);
+
+    CHECK(s.outlen == 300000, "stdout length %zu, expected 300000 (stderr: %.*s)", s.outlen,
+          (int)s.errlen, s.err ? (char *)s.err : "");
+    CHECK(s.wretes > 1, "only %d WRTE packet(s): output was not chunked", s.wretes);
+    size_t bad = 0;
+    for (size_t i = 0; i < s.outlen; i++)
+        if (s.out[i] != 'x') { bad = i; break; }
+    CHECK(bad == 0, "byte %zu is 0x%02x, expected 'x'", bad, s.out[bad]);
+    CHECK(s.have_exit && s.exit_code == 0, "exit code %d", s.exit_code);
+    printf("[host] big output: %zu bytes in %d WRTE packets\n", s.outlen, s.wretes);
+    sink_free(&s);
+    return 0;
+fail:
+    sink_free(&s);
+    return -1;
+}
+
+/* stdin path: head takes exactly 11 bytes then exits, so we do not need a
+ * half-close (which the protocol has no way to express). */
+static int case_stdin(void)
+{
+    struct chan ch;
+    struct sink s;
+    memset(&s, 0, sizeof s);
+
+    const char svc[] = "shell,v2,raw:head -c 11";
+    int rc = open_service(svc, sizeof svc, &ch);
+    CHECK(rc == 0, "open failed rc=%d", rc);
+
+    const char text[] = "hello-stdin\n";
+    unsigned char payload[5 + sizeof text - 1];
+    uint32_t l = (uint32_t)(sizeof text - 1);
+    payload[0] = 0;
+    payload[1] = (unsigned char)(l & 0xff);
+    payload[2] = (unsigned char)((l >> 8) & 0xff);
+    payload[3] = (unsigned char)((l >> 16) & 0xff);
+    payload[4] = (unsigned char)((l >> 24) & 0xff);
+    memcpy(payload + 5, text, sizeof text - 1);
+    send_msg(A_WRTE, ch.my_id, ch.dev_id, payload, sizeof payload);
+
+    CHECK(pump(&ch, &s, 1, 20000) == 0, "%s", g_why);
+    CHECK(s.outlen == 11 && !memcmp(s.out, "hello-stdin", 11), "stdout '%.*s' (%zu bytes)",
+          (int)s.outlen, s.out ? (char *)s.out : "", s.outlen);
+    CHECK(s.have_exit && s.exit_code == 0, "exit code %d", s.exit_code);
+    sink_free(&s);
+    return 0;
+fail:
+    sink_free(&s);
+    return -1;
+}
+
+/* exec: takes a NUL-separated argv, no shell, so the space must survive as
+ * part of a single argument. */
+static int case_exec(void)
+{
+    struct chan ch;
+    struct sink s;
+    memset(&s, 0, sizeof s);
+
+    const char a0[] = "exec:";
+    const char a1[] = "printf";
+    const char a2[] = "hello world\n";
+    unsigned char svc[sizeof a0 + sizeof a1 + sizeof a2];
+    size_t off = 0;
+    memcpy(svc + off, a0, sizeof a0 - 1); off += sizeof a0 - 1;   /* keeps the colon, drops NUL */
+    memcpy(svc + off, a1, sizeof a1); off += sizeof a1;
+    memcpy(svc + off, a2, sizeof a2); off += sizeof a2;
+
+    int rc = open_service((const char *)svc, off, &ch);
+    CHECK(rc == 0, "open failed rc=%d", rc);
+    CHECK(pump(&ch, &s, 0, 20000) == 0, "%s", g_why);
+    CHECK(s.outlen == 12 && !memcmp(s.out, "hello world\n", 12), "stdout '%.*s' (%zu bytes)",
+          (int)s.outlen, s.out ? (char *)s.out : "", s.outlen);
+    CHECK(s.closed, "channel not closed");
+    sink_free(&s);
+    return 0;
+fail:
+    sink_free(&s);
+    return -1;
+}
+
+static int case_not_found(void)
+{
+    struct chan ch;
+    struct sink s;
+    memset(&s, 0, sizeof s);
+
+    const char svc[] = "shell,v2,raw:definitely-not-a-command-xyz123";
+    int rc = open_service(svc, sizeof svc, &ch);
+    CHECK(rc == 0, "open failed rc=%d", rc);
+    CHECK(pump(&ch, &s, 1, 20000) == 0, "%s", g_why);
+
+    CHECK(s.errlen > 0, "stderr empty, expected a 'not found' message");
+    CHECK(s.have_exit && s.exit_code == 127, "exit code %d, expected 127", s.exit_code);
+    printf("[host] stderr: %.*s", (int)s.errlen, (char *)s.err);
+    sink_free(&s);
+    return 0;
+fail:
+    sink_free(&s);
+    return -1;
+}
+
+static int case_refused(void)
+{
+    struct chan ch;
+    const char svc[] = "reboot:bootloader";
+    int rc = open_service(svc, sizeof svc, &ch);
+    CHECK(rc == -2, "expected refusal, got rc=%d", rc);
+    return 0;
+fail:
+    return -1;
+}
+
+static void report(const char *name, int ok)
+{
+    g_total++;
+    if (ok) {
+        g_pass++;
+        printf("[host] PASS %s\n", name);
+    } else {
+        printf("[host] FAIL %s: %s\n", name, g_reason[0] ? g_reason : g_why);
+    }
+}
+
+static int handshake(uint32_t n[RSA_LIMBS], uint32_t d[RSA_LIMBS], int bad_signature)
+{
+    struct rx r;
+    if (recv_msg(&r, 10000) != 1 || r.cmd != A_CNXN) return -1;
+    printf("[host] banner: %s\n", r.data ? (char *)r.data : "");
+    if (!r.data || !memmem(r.data, r.len, "features=shell_v2", 17)) {
+        printf("[host] banner does not advertise shell_v2\n");
+    }
+    free(r.data);
+
+    const char banner[] = "host::features=shell_v2";
+    send_msg(A_CNXN, A_VERSION, A_MAXDATA, banner, sizeof banner);
+
+    if (recv_msg(&r, 10000) != 1 || r.cmd != A_AUTH || r.a0 != AUTH_TOKEN) return -1;
+    unsigned char token[TOKEN_SIZE];
+    if (r.len < TOKEN_SIZE) { free(r.data); return -1; }
+    memcpy(token, r.data, TOKEN_SIZE);
+    free(r.data);
+    printf("[host] token: ");
+    for (int i = 0; i < TOKEN_SIZE; i++) printf("%02x", token[i]);
+    printf("\n");
+
+    unsigned char sig[RSA_SIG_SIZE];
+    rsa_sign_sha1(n, d, token, TOKEN_SIZE, sig);
+    if (bad_signature) sig[100] ^= 0xff;
+    send_msg(A_AUTH, AUTH_SIGNATURE, 0, sig, sizeof sig);
+
+    if (recv_msg(&r, 20000) != 1) return -1;
+    if (bad_signature) {
+        int rejected = (r.cmd == A_AUTH && r.a0 == AUTH_TOKEN);
+        free(r.data);
+        return rejected ? 0 : -1;
+    }
+    if (r.cmd != A_CNXN) { free(r.data); return -1; }
+    printf("[host] authenticated, banner again: %s\n", r.data ? (char *)r.data : "");
+    free(r.data);
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 4) {
         fprintf(stderr, "usage: %s <usbgwd> <adb_keys> <hostkey.txt> [bad]\n", argv[0]);
         return 2;
     }
-    int bad_signature = (argc > 4 && !strcmp(argv[4], "bad"));
+    int bad = (argc > 4 && !strcmp(argv[4], "bad"));
 
     uint32_t n[RSA_LIMBS], d[RSA_LIMBS];
     if (load_hostkey(argv[3], n, d) != 0) {
@@ -119,76 +462,33 @@ int main(int argc, char **argv)
     }
     close(sv[1]);
     g_fd = sv[0];
-    alarm(60);
+    alarm(120);
 
-    int pass = 0, stage = 0;
-    uint32_t cmd, a0, a1, len;
-    unsigned char *data = NULL;
-
-    /* 1. device banner */
-    if (recv_msg(&cmd, &a0, &a1, &data, &len, 10000) != 1 || cmd != A_CNXN) goto done;
-    printf("[host] banner: %s\n", data ? (char *)data : "");
-    free(data); data = NULL;
-
-    /* 2. host banner */
-    const char banner[] = "host::features=shell_v2,cmd";
-    send_msg(A_CNXN, A_VERSION, A_MAXDATA, banner, sizeof banner);
-
-    /* 3. auth token */
-    if (recv_msg(&cmd, &a0, &a1, &data, &len, 10000) != 1 || cmd != A_AUTH || a0 != AUTH_TOKEN) goto done;
-    unsigned char token[TOKEN_SIZE];
-    memcpy(token, data, TOKEN_SIZE);
-    free(data); data = NULL;
-    printf("[host] token: ");
-    for (int i = 0; i < TOKEN_SIZE; i++) printf("%02x", token[i]);
-    printf("\n");
-
-    /* 4. signature */
-    unsigned char sig[RSA_SIG_SIZE];
-    rsa_sign_sha1(n, d, token, TOKEN_SIZE, sig);
-    if (bad_signature) sig[100] ^= 0xff;
-    send_msg(A_AUTH, AUTH_SIGNATURE, 0, sig, sizeof sig);
-
-    /* 5. expect either a fresh token (rejected) or the banner again (accepted) */
-    if (recv_msg(&cmd, &a0, &a1, &data, &len, 20000) != 1) goto done;
-    if (bad_signature) {
-        if (cmd == A_AUTH && a0 == AUTH_TOKEN) {
-            printf("[host] RESULT: bad signature correctly rejected\n");
-            pass = 1;
-        }
-        free(data);
+    struct rx r;
+    int hs = handshake(n, d, bad);
+    if (bad) {
+        report("bad signature rejected", hs == 0);
+        printf("[host] RESULT: %d/%d passed\n", g_pass, g_total);
         goto done;
     }
-    if (cmd != A_CNXN) { free(data); goto done; }
-    printf("[host] authenticated, banner again: %s\n", data ? (char *)data : "");
-    free(data); data = NULL;
+    report("handshake + auth", hs == 1);
+    if (hs == 1) {
+        report("shell: v1", case_shell_v1() == 0);
+        report("shell: v2 stdout/stderr/exit", case_shell_v2() == 0);
+        report("shell: v2 300 KB chunked output", case_big_output() == 0);
+        report("shell: v2 stdin", case_stdin() == 0);
+        report("exec: NUL-separated argv", case_exec() == 0);
+        report("shell: command not found -> 127", case_not_found() == 0);
+        report("refused service -> CLSE", case_refused() == 0);
+    }
 
-    /* 6. open the echo service */
-    const char svc[] = "echo:hello-adbng";
-    uint32_t my_id = g_next_id++;
-    send_msg(A_OPEN, my_id, 0, svc, sizeof svc);
-
-    /* 7. OKAY, WRTE, CLSE */
-    if (recv_msg(&cmd, &a0, &a1, &data, &len, 20000) != 1 || cmd != A_OKAY) goto done;
-    uint32_t peer = a0;
-    free(data); data = NULL;
-
-    if (recv_msg(&cmd, &a0, &a1, &data, &len, 20000) != 1 || cmd != A_WRTE) goto done;
-    printf("[host] service payload: %s", data ? (char *)data : "");
-    free(data); data = NULL;
-
-    if (recv_msg(&cmd, &a0, &a1, &data, &len, 20000) != 1 || cmd != A_CLSE) goto done;
-    free(data); data = NULL;
-    (void)peer;
-
-    printf("[host] RESULT: handshake + auth + channel round trip OK\n");
-    pass = 1;
+    printf("[host] RESULT: %d/%d passed\n", g_pass, g_total);
 
 done:
-    if (!pass) printf("[host] RESULT: FAILED at stage %d\n", stage);
     close(g_fd);
     int st = 0;
     waitpid(child, &st, 0);
     printf("[host] child exit status %d\n", WIFEXITED(st) ? WEXITSTATUS(st) : -1);
-    return pass ? 0 : 1;
+    (void)r;
+    return (g_pass == g_total) ? 0 : 1;
 }

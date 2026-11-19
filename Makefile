@@ -9,7 +9,7 @@ CFLAGS  ?= -std=c11 -O2 -Wall -Wextra -I src -D_GNU_SOURCE
 LDFLAGS ?= -static
 
 BUILD  := build
-SRCS_D := src/daemon.c src/util.c src/rsa.c src/keys.c
+SRCS_D := src/daemon.c src/shell.c src/util.c src/rsa.c src/keys.c
 SRCS_T := tests/host_tester.c src/util.c src/rsa.c
 
 .PHONY: all clean test key
@@ -31,7 +31,6 @@ key:
 # protocol self test, no USB required
 test: all key
 	$(BUILD)/host_tester $(BUILD)/usbgwd $(BUILD)/adb_keys $(BUILD)/hostkey.txt
-
 test-bad: all key
 	$(BUILD)/host_tester $(BUILD)/usbgwd $(BUILD)/adb_keys $(BUILD)/hostkey.txt bad
 
