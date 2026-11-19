@@ -117,6 +117,33 @@ host 中途拔掉 → .req/.decision 清掉，不记录
 状态目录可用 `ADBNG_STATE_DIR` 覆盖（默认 `/data/adb/adbng`），回归就是靠它把状态指到临时目录。
 首次安装 `adb_keys` 为空也能启动：不再当致命错误，直接进配对流程。
 
+## 生命周期管理（tools/adbngctl.sh）
+
+`usbgwd` 只管协议，开关、gadget、看门狗、配对决策都在这个脚本里，管理器 app 调 `su -c` 执行。
+
+```
+adbngctl start      先 ctl.stop adbd，再复查一遍，过了才 install/起 daemon/add
+adbngctl stop       停 daemon、解绑；**不会**把系统 adb 拉回来
+adbngctl status     key=value，给 app 直接拆
+adbngctl ensure     开机路径：只在 enabled=1 时 start
+adbngctl allow <fp> / deny <fp> / pending / devices
+```
+
+状态都在 `$ADBNG_STATE_DIR`（默认 `/data/adb/adbng`）：
+`enabled`（开关持久化，开机据此恢复）、`adb_keys`、`pending/`、`devices.tsv`、
+`adbng.log`、`usbgwd.pid`、`watchdog.pid`、`takeover.fails`。
+
+几个已钉死的规则：
+
+- **拒绝对抗**：start 先杀 adbd 再复查（`pidof adbd` 为空、活动配置里没有指向 `ffs.adb` 的链接），
+  任何一步不过就输出“adbng 不可用，请使用 adbhide”，不去抢 UDC。
+  注意 adb 的函数不一定是 `function0`（本机 `function0` 是 `ffs.mtp`），所以是扫全部 `function*` 链接而不是猜槽位。
+- **顺序**：`install`（挂 functionfs）→ 起 daemon（写描述符和 strings）→ `add`（链接并绑定 UDC）。
+  反过来 configfs 会拒掉未初始化的函数。
+- **看门狗**：每 5 秒盯一次；daemon 掉了就重启；发现 adbd 回来了就停掉它、重新 `del`+`add` 抢回 UDC。
+  连续 3 次失败就**认输**：写 `enabled=0`、停掉 adbng、发一条通知，不再让 USB 来回抖。
+- **stop 不恢复 adb**：用户关掉 adbng 就是关掉调试，不替用户做决定。
+
 ## USB（M4）踩过的三个坑
 
 调试记录，省得下次再撞：
