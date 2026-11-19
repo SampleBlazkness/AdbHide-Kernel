@@ -19,7 +19,9 @@
 - `shell,pty:` / `shell,v2,pty:` 真伪终端：`/dev/ptmx` 直接开、`setsid` + `TIOCSCTTY` 取得控制终端（^C/^\/^Z 变成 `SIGINT`/`SIGQUIT`/`SIGTSTP`）、`kIdCloseStdin` 用 tty EOF 字符表达半关闭、`kIdWindowSize` 走 `TIOCSWINSZ` 并触发 `SIGWINCH`；pty 不可用时自动降级为管道
 - `TERM=` 子服务参数透传到子进程环境；pty 默认 `xterm-256color`，管道默认 `dumb`
 - `exec:`（NUL 分隔 argv，不过 shell，参数原样透传）
-- `sync:` v1 **只读**：`STAT` / `LIST` / `RECV`，`DATA`…`DONE` 分帧，`QUIT` 收尾
+- `sync:` v1：`STAT` / `LIST` / `RECV`，`DATA`…`DONE` 分帧，`QUIT` 收尾
+- `sync:` **SEND（push，M5a）**：`path,mode`（mode 十进制，取 `&07777`）建文件 → 每帧 `DATA` 落盘后回 `OKAY` → `DONE` 的 mtime 用 `futimens` 落时间戳再回 `OKAY`；失败一律 `FAIL` 带 `strerror`
+- SEND 默认**关**：只有 `ADBNG_WRITE_ROOTS=/a:/b` 或 `/data/adb/adbng/write_roots.conf`（每行一个前缀，`#` 注释）里列出的目录前缀可写；路径先做文本归一化（折叠 `..`/`.`），逐个前缀匹配，不在白名单内直接 `FAIL`
 - 传输层抽象成 `struct link_ops`（`init`/`pollfds`/`on_event`/`send_frame`/`out_fd`/`flush`/`shutdown`），
   `--fd N`（socketpair，测试用）与 `--ffs DIR`（USB）二选一，切换不动协议层
 - FunctionFS 后端：写 adb 描述符（v1 头，FS/HS 两套，class `ff/42/01`，ep1 IN / ep2 OUT，HS 512 字节）
@@ -32,7 +34,8 @@
 
 - banner 里的机型属性取自 `ADBNG_PRODUCT_*` 环境变量，**不是**读 Android 属性服务
 - 新 host 只记录指纹后断开，**没有**本机确认流程
-- **`sync:` 的 SEND（push）明确拒绝**：那是 root 级写文件能力，等 M5 的授权层就位再做
+- SEND 的白名单是**前缀匹配**，不解析符号链接：白名单内的软链可以把写落在名单外（对 root 客户端只是护栏，不是沙箱）
+- `sync:` 的 SEND 没有断点续传 / 原子替换（`O_TRUNC` 直写），失败时目标文件可能已是半截
 - `sync_v2`（`STA2`/`LIS2`/`SND2`）未做，banner 也**没有**宣告 `sendrecv_v2`，老客户端会退回 v1
 - `forward:` / `reboot:` / `root:` 仍走拒绝分支
 - **FunctionFS 端到端未验证**：本机 UDC `a600000.dwc3` 当前 `state = not attached`（没有主机连接），
@@ -58,7 +61,7 @@ make test-bad # 只跑"签名错误应被拒绝"
 ## 测试
 
 `tests/host_tester.c` 是手写的 host 端，用 `socketpair` 驱动 `usbgwd`，不依赖 USB。
-当前 15 项回归：
+当前 16 项回归：
 
 ```
 [host] PASS handshake + auth
@@ -75,8 +78,9 @@ make test-bad # 只跑"签名错误应被拒绝"
 [host] PASS sync: STAT
 [host] PASS sync: LIST
 [host] PASS sync: RECV 200 KB
-[host] PASS sync: SEND refused (read-only)
-[host] RESULT: 15/15 passed
+[host] PASS sync: SEND outside roots denied
+[host] PASS sync: SEND 200 KB push
+[host] RESULT: 16/16 passed
 ```
 
 pty 三项分别在验证：`tty` 报出 `/dev/pts/N`（管道只会说 "not a tty"）、

@@ -358,6 +358,8 @@ static void open_sync(const char *name, uint32_t host_id)
     if (!c) { refuse(host_id, name); return; }
     c->sync = sync_new();
     if (!c->sync) { chan_release(c); refuse(host_id, name); return; }
+    /* Push stays disabled unless the operator listed writable prefixes. */
+    sync_config_write_roots(c->sync, getenv("ADBNG_WRITE_ROOTS"));
     c->kind = KIND_SYNC;
     c->v2 = 0;
     c->can_send = 1;

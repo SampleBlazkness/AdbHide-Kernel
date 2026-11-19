@@ -533,6 +533,8 @@ static int sync_wait(struct chan *ch, int want, struct syncres *r, int timeout_m
             }
             if (id == 0x41544144u) {              /* DATA */
                 if (buf_add(&r->data, &r->datalen, &r->datacap, p, fl) != 0) return -1;
+            } else if (id == 0x59414b4fu && fl == 0) {  /* OKAY */
+                if (want == 3) return 0;
             } else if (id == 0x454e4f44u) {       /* DONE */
                 r->done = 1;
                 if (want == 2) return 0;
@@ -665,23 +667,97 @@ fail:
     return -1;
 }
 
-static int case_sync_send(const char *path)
+static void send_frame(struct chan *ch, uint32_t id, const void *p, uint32_t len)
+{
+    static unsigned char buf[8 + 70000];
+    put32(buf, id);
+    put32(buf + 4, len);
+    if (len) memcpy(buf + 8, p, len);
+    send_msg(A_WRTE, ch->my_id, ch->dev_id, buf, 8 + len);
+}
+
+/* SEND to a path outside the configured write roots must be refused. */
+static int case_sync_send_denied(const char *path)
 {
     struct chan ch;
     struct syncres r;
-    memset(&r, 0, sizeof r);
+    char req[1024];
 
+    memset(&r, 0, sizeof r);
     int rc = open_service("sync:", 6, &ch);
     CHECK(rc == 0, "open sync failed rc=%d", rc);
 
-    sync_req(&ch, 0x444e4553u, path);          /* SEND must be refused */
-    CHECK(sync_wait(&ch, 2, &r, 20000) != 0, "SEND was not refused");
-    CHECK(strstr(r.msg, "read-only") != NULL, "unexpected FAIL message: %s", r.msg);
-    printf("[host] send refused: %s\n", r.msg);
+    snprintf(req, sizeof req, "%s,420", path);      /* 0644 in decimal */
+    sync_req(&ch, 0x444e4553u, req);                /* SEND */
+    CHECK(sync_wait(&ch, 3, &r, 20000) != 0, "SEND outside write roots was accepted");
+    CHECK(strstr(r.msg, "outside write roots") != NULL, "unexpected FAIL message: %s", r.msg);
+    printf("[host] send denied: %s\n", r.msg);
 
     free(r.data);
     send_msg(A_CLSE, ch.my_id, ch.dev_id, NULL, 0);
     expect_clse(&ch, 20000);
+    return 0;
+fail:
+    free(r.data);
+    return -1;
+}
+
+/* Full push: SEND -> DATA* (each acked with OKAY) -> DONE -> OKAY. */
+static int case_sync_send_ok(const char *path, const unsigned char *data, size_t n,
+                             unsigned mode)
+{
+    struct chan ch;
+    struct syncres r;
+    char req[1024];
+    unsigned char done[4];
+    int chunks = 0;
+    size_t off = 0;
+
+    memset(&r, 0, sizeof r);
+    unlink(path);
+
+    int rc = open_service("sync:", 6, &ch);
+    CHECK(rc == 0, "open sync failed rc=%d", rc);
+
+    snprintf(req, sizeof req, "%s,%u", path, mode);
+    sync_req(&ch, 0x444e4553u, req);                /* SEND: the file is created now */
+
+    while (off < n) {
+        size_t chunk = n - off;
+        if (chunk > 65536) chunk = 65536;
+        send_frame(&ch, 0x41544144u, data + off, (uint32_t)chunk);   /* DATA */
+        CHECK(sync_wait(&ch, 3, &r, 20000) == 0, "DATA chunk %d not acked: %s", chunks, r.msg);
+        free(r.data);
+        r.data = NULL;
+        off += chunk;
+        chunks++;
+    }
+
+    put32(done, 0);                                  /* mtime 0 = leave it alone */
+    send_frame(&ch, 0x454e4f44u, done, 4);           /* DONE */
+    CHECK(sync_wait(&ch, 3, &r, 20000) == 0, "DONE not acked: %s", r.msg);
+    free(r.data);
+    r.data = NULL;
+
+    struct stat st;
+    CHECK(stat(path, &st) == 0, "pushed file is missing");
+    CHECK((size_t)st.st_size == n, "size %lld != %zu", (long long)st.st_size, n);
+    CHECK((st.st_mode & 07777) == (mode & 07777), "mode %04o != %04o",
+          (unsigned)(st.st_mode & 07777), mode & 07777);
+
+    unsigned char *back = malloc(n ? n : 1);
+    CHECK(back != NULL, "out of memory");
+    FILE *f = fopen(path, "rb");
+    CHECK(f != NULL, "cannot reopen the pushed file");
+    size_t got = fread(back, 1, n, f);
+    fclose(f);
+    CHECK(got == n, "read back %zu of %zu bytes", got, n);
+    CHECK(memcmp(back, data, n) == 0, "pushed content mismatch");
+    free(back);
+
+    send_msg(A_CLSE, ch.my_id, ch.dev_id, NULL, 0);
+    expect_clse(&ch, 20000);
+    printf("[host] pushed %zu bytes in %d chunk(s)\n", n, chunks);
     return 0;
 fail:
     free(r.data);
@@ -766,6 +842,14 @@ int main(int argc, char **argv)
         setenv("ADBNG_PRODUCT_NAME", "adbng", 1);
         setenv("ADBNG_PRODUCT_MODEL", "adbng-self-test", 1);
         setenv("ADBNG_PRODUCT_DEVICE", "adbng-self-test", 1);
+        {
+            /* the daemon only accepts SEND inside the configured roots */
+            const char *td = getenv("ADBNG_TEST_DIR");
+            char roots[512];
+            if (!td || !*td) td = "/tmp";
+            snprintf(roots, sizeof roots, "%s/writable", td);
+            setenv("ADBNG_WRITE_ROOTS", roots, 1);
+        }
         execl(argv[1], argv[1], "--fd", "3", "--keys", argv[2], (char *)NULL);
         _exit(4);
     }
@@ -801,11 +885,14 @@ int main(int argc, char **argv)
         if (!expect) { printf("[host] out of memory\n"); goto done; }
         for (size_t i = 0; i < fsize; i++) expect[i] = (unsigned char)((i * 7 + 3) & 0xff);
 
-        char fpath[512], dpath[512], p1[600], p2[600];
+        char fpath[512], dpath[512], p1[600], p2[600], wdir[600], wpush[700];
         snprintf(fpath, sizeof fpath, "%s/adbng-sync-%d.bin", td, (int)getpid());
         snprintf(dpath, sizeof dpath, "%s/adbng-sync-%d.dir", td, (int)getpid());
         snprintf(p1, sizeof p1, "%s/alpha.txt", dpath);
         snprintf(p2, sizeof p2, "%s/beta.txt", dpath);
+        snprintf(wdir, sizeof wdir, "%s/writable", td);
+        snprintf(wpush, sizeof wpush, "%s/pushed-%d.bin", wdir, (int)getpid());
+        mkdir(wdir, 0755);
 
         FILE *f = fopen(fpath, "wb");
         if (!f) { printf("[host] cannot create %s\n", fpath); free(expect); goto done; }
@@ -820,7 +907,10 @@ int main(int argc, char **argv)
         report("sync: STAT", case_sync_stat(fpath, fsize) == 0);
         report("sync: LIST", case_sync_list(dpath, "alpha.txt", "beta.txt") == 0);
         report("sync: RECV 200 KB", case_sync_recv(fpath, expect, fsize) == 0);
-        report("sync: SEND refused (read-only)", case_sync_send(fpath) == 0);
+        report("sync: SEND outside roots denied", case_sync_send_denied(fpath) == 0);
+        report("sync: SEND 200 KB push", case_sync_send_ok(wpush, expect, fsize, 0644) == 0);
+
+        unlink(wpush);
 
         unlink(p1);
         unlink(p2);
