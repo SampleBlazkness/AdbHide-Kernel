@@ -5,10 +5,12 @@
  * M2: framing, CNXN banner, AUTH, channel multiplexing.
  * M3: single-threaded poll loop, per-channel flow control, `shell:` (v1 and
  *     v2 sub-packets, optional pty) and `exec:`.
+ * M4: the transport is pluggable - byte stream (socketpair) or USB FunctionFS.
  *
- * Still missing: sync: write direction, forward:, transport != socketpair.
+ * Still missing: sync: write direction, forward:.
  */
 #include "keys.h"
+#include "link.h"
 #include "proto.h"
 #include "shell.h"
 #include "sync.h"
@@ -73,7 +75,7 @@ struct channel {
     struct sync_state *sync;       /* KIND_SYNC */
 };
 
-static int g_fd = -1;
+static const struct link_ops *g_link;
 static struct key_store g_keys;
 static unsigned char g_token[TOKEN_SIZE];
 static int g_auth_state;
@@ -91,8 +93,8 @@ static void send_msg(uint32_t cmd, uint32_t a0, uint32_t a1, const void *data, s
     m.data_length = (uint32_t)len;
     m.magic = amsg_magic(cmd);
     logmsg("-> %-4s arg0=%u arg1=%u len=%zu", amsg_name(cmd), a0, a1, len);
-    if (io_write_full(g_fd, &m, AMSG_SIZE) != 0) return;
-    if (len) io_write_full(g_fd, data, len);
+    if (g_link->send_frame(&m, data, len) != 0) return;
+    g_link->flush();
 }
 
 static void send_wrte(struct channel *c, int stream, const unsigned char *buf, size_t len)
@@ -600,48 +602,113 @@ static void handle_channel_io(struct channel *c, int what)
     }
 }
 
+/* One protocol message off the wire.  Returns <0 when the link has to go. */
+static int handle_message(const struct amessage *m, unsigned char *data)
+{
+    int rc = 0;
+    switch (m->command) {
+    case A_CNXN:
+        break;
+    case A_AUTH:
+        rc = on_auth(m, data);
+        break;
+    case A_OPEN:
+        rc = on_open(m, data);
+        break;
+    case A_WRTE:
+        rc = on_write(m, data);
+        break;
+    case A_CLSE:
+        on_close(m);
+        break;
+    case A_OKAY: {
+        struct channel *c = chan_by_local(m->arg1);
+        if (c) c->can_send = 1;
+        break;
+    }
+    case A_STLS:
+        logmsg("stls not supported over this transport");
+        rc = -1;
+        break;
+    default:
+        logmsg("unknown command %08x", m->command);
+        break;
+    }
+    return rc;
+}
+
+/* A new enumeration or a fresh host: nothing from the previous session can be
+ * reused, and the host expects CNXN from scratch. */
+static void link_restart(void)
+{
+    for (int i = 0; i < MAX_CHANNELS; i++)
+        if (g_chan[i].used) chan_release(&g_chan[i]);
+    g_auth_state = 0;
+    g_token_rounds = 0;
+    send_cnxn();
+    send_token();
+}
+
 int main(int argc, char **argv)
 {
     const char *keys_path = NULL;
+    const char *ffs_path = NULL;
+    int fd = -1;
     signal(SIGPIPE, SIG_IGN);
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--fd") && i + 1 < argc) {
-            g_fd = atoi(argv[++i]);
+            fd = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--ffs") && i + 1 < argc) {
+            ffs_path = argv[++i];
         } else if (!strcmp(argv[i], "--keys") && i + 1 < argc) {
             keys_path = argv[++i];
         } else if (!strcmp(argv[i], "--verbose")) {
             /* logging is always on for now */
         } else {
-            fprintf(stderr, "usage: usbgwd --fd N --keys PATH\n");
+            fprintf(stderr, "usage: usbgwd (--fd N | --ffs DIR) --keys PATH\n");
             return 2;
         }
     }
-    if (g_fd < 0 || !keys_path) {
-        fprintf(stderr, "usage: usbgwd --fd N --keys PATH\n");
+    if ((fd < 0) == (ffs_path == NULL) || !keys_path) {
+        fprintf(stderr, "usage: usbgwd (--fd N | --ffs DIR) --keys PATH\n");
         return 2;
     }
+    g_link = ffs_path ? link_ffs(ffs_path) : link_fd(fd);
 
     int kcount = keys_load(keys_path, &g_keys);
     if (kcount <= 0) {
         logmsg("no usable host key in %s", keys_path);
         return 1;
     }
-    logmsg("usbgwd start: fd=%d keys=%d", g_fd, kcount);
+    logmsg("usbgwd start: link=%s keys=%d", g_link->name, kcount);
 
-    send_cnxn();
-    send_token();
+    int lr = g_link->init();
+    if (lr < 0) {
+        logmsg("link init failed");
+        return 1;
+    }
+    if (lr == 1) {
+        send_cnxn();
+        send_token();
+    }
 
     for (;;) {
-        struct pollfd pfds[1 + MAX_CHANNELS * 3];
-        struct { struct channel *c; int what; } map[1 + MAX_CHANNELS * 3];
+        struct pollfd pfds[LINK_MAX_FDS + MAX_CHANNELS * 3];
+        int ids[LINK_MAX_FDS + MAX_CHANNELS * 3];
+        struct { struct channel *c; int what; } map[LINK_MAX_FDS + MAX_CHANNELS * 3];
         int nfds = 0;
+        int link_n = 0;
 
-        pfds[nfds].fd = g_fd;
-        pfds[nfds].events = POLLIN;
-        map[nfds].c = NULL;
-        map[nfds].what = EV_LINK;
-        nfds++;
+        /* Link entries come first so the transport can also register a write
+         * side (ffs needs one for the bulk IN endpoint). */
+        int n = g_link->pollfds(0, pfds, ids, LINK_MAX_FDS);
+        for (int i = 0; i < n; i++) {
+            map[i].c = NULL;
+            map[i].what = EV_LINK;
+        }
+        link_n = n;
+        nfds = n;
 
         for (int i = 0; i < MAX_CHANNELS; i++) {
             struct channel *c = &g_chan[i];
@@ -687,63 +754,35 @@ int main(int argc, char **argv)
             break;
         }
 
-        if (pr > 0 && (pfds[0].revents & (POLLIN | POLLHUP | POLLERR))) {
-            struct amessage m;
-            if (io_read_full(g_fd, &m, AMSG_SIZE) != 0) {
-                logmsg("link closed");
-                break;
+        /* Transport events first: a frame, a fresh enumeration, or a dead link.
+         * One frame per pass keeps the loop fair between link and children. */
+        int dead = 0;
+        for (int i = 0; i < link_n; i++) {
+            if (!pfds[i].revents) continue;
+            if (pfds[i].revents & (POLLIN | POLLHUP | POLLERR | POLLOUT)) {
+                struct amessage m;
+                unsigned char *data = NULL;
+                int rc = g_link->on_event(ids[i], &m, &data);
+                if (rc == 1) {
+                    logmsg("<- %-4s arg0=%u arg1=%u len=%u", amsg_name(m.command), m.arg0,
+                           m.arg1, m.data_length);
+                    if (handle_message(&m, data) < 0) dead = 1;
+                    free(data);
+                } else if (rc == 2) {
+                    link_restart();
+                } else if (rc < 0) {
+                    logmsg("link gone");
+                    dead = 1;
+                }
             }
-            if (m.magic != amsg_magic(m.command)) {
-                logmsg("bad magic for %08x", m.command);
-                break;
-            }
-            if (m.data_length > A_MAXDATA) {
-                logmsg("oversized payload %u", m.data_length);
-                break;
-            }
-            unsigned char *data = NULL;
-            if (m.data_length) {
-                data = malloc(m.data_length);
-                if (!data) break;
-                if (io_read_full(g_fd, data, m.data_length) != 0) { free(data); break; }
-            }
-            logmsg("<- %-4s arg0=%u arg1=%u len=%u", amsg_name(m.command), m.arg0,
-                   m.arg1, m.data_length);
-
-            int rc = 0;
-            switch (m.command) {
-            case A_CNXN:
-                break;
-            case A_AUTH:
-                rc = on_auth(&m, data);
-                break;
-            case A_OPEN:
-                rc = on_open(&m, data);
-                break;
-            case A_WRTE:
-                rc = on_write(&m, data);
-                break;
-            case A_CLSE:
-                on_close(&m);
-                break;
-            case A_OKAY: {
-                struct channel *c = chan_by_local(m.arg1);
-                if (c) c->can_send = 1;
-                break;
-            }
-            case A_STLS:
-                logmsg("stls not supported over this transport");
-                rc = -1;
-                break;
-            default:
-                logmsg("unknown command %08x", m.command);
-                break;
-            }
-            free(data);
-            if (rc < 0) break;
         }
 
-        for (int i = 1; i < nfds; i++) {
+        if (dead) {
+            logmsg("link closed");
+            break;
+        }
+
+        for (int i = link_n; i < nfds; i++) {
             if (!pfds[i].revents) continue;
             if (!map[i].c || !map[i].c->used) continue;
             handle_channel_io(map[i].c, map[i].what);
@@ -770,10 +809,18 @@ int main(int argc, char **argv)
                 chan_release(c);
             }
         }
+
+        /* Push whatever the transport still holds; a full USB endpoint simply
+         * returns "would block" and the next poll waits for POLLOUT. */
+        if (g_link->flush() < 0) {
+            logmsg("link write failed");
+            break;
+        }
     }
 
     for (int i = 0; i < MAX_CHANNELS; i++)
         if (g_chan[i].used) chan_release(&g_chan[i]);
+    g_link->shutdown();
 
     logmsg("usbgwd exit");
     return 0;

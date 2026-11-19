@@ -2,7 +2,8 @@
 
 自写用户态 ADB **设备端**实现。目标：PC 上用原厂 `adb` 直接连上本机，不经过系统 `adbd`。
 
-> 状态：M2（协议核心）+ M3（shell / exec / pty / sync 读方向）完成，proot 与真机各 15/15 回归通过。
+> 状态：M4（USB FunctionFS 传输层）已在本机 gadget 上绑定成功，端到端（ENABLE / 真主机）尚未验证；
+> M2（协议核心）+ M3（shell / exec / pty / sync 读方向）proot 与真机各 15/15 回归通过。
 > `sync` 写方向（push）未做。**当前不是可发布形态。**
 
 ## 已实现（真的）
@@ -19,6 +20,12 @@
 - `TERM=` 子服务参数透传到子进程环境；pty 默认 `xterm-256color`，管道默认 `dumb`
 - `exec:`（NUL 分隔 argv，不过 shell，参数原样透传）
 - `sync:` v1 **只读**：`STAT` / `LIST` / `RECV`，`DATA`…`DONE` 分帧，`QUIT` 收尾
+- 传输层抽象成 `struct link_ops`（`init`/`pollfds`/`on_event`/`send_frame`/`out_fd`/`flush`/`shutdown`），
+  `--fd N`（socketpair，测试用）与 `--ffs DIR`（USB）二选一，切换不动协议层
+- FunctionFS 后端：写 adb 描述符（v1 头，FS/HS 两套，class `ff/42/01`，ep1 IN / ep2 OUT，HS 512 字节）
+  **以及必须跟上的空 strings 表**；ep0 事件机（BIND/UNBIND/ENABLE/DISABLE/SETUP/SUSPEND/RESUME）；
+  `ENABLE` 后返回 2 让 daemon 重发 CNXN/AUTH；发送队列带 compaction，`EAGAIN` 转 POLLOUT
+- `tools/usb-gadget.sh`：`install` / `add` / `del` / `remove` / `status`（`ADBNG_GADGET`/`ADBNG_UDC`/`ADBNG_FUNC`/`ADBNG_SLOT` 可覆盖）
 - 未识别服务 → `CLSE` 拒绝
 
 ## 未实现（别当真）
@@ -28,7 +35,10 @@
 - **`sync:` 的 SEND（push）明确拒绝**：那是 root 级写文件能力，等 M5 的授权层就位再做
 - `sync_v2`（`STA2`/`LIS2`/`SND2`）未做，banner 也**没有**宣告 `sendrecv_v2`，老客户端会退回 v1
 - `forward:` / `reboot:` / `root:` 仍走拒绝分支
-- **仅 socketpair transport，没有 FunctionFS** → PC 现在还连不上
+- **FunctionFS 端到端未验证**：本机 UDC `a600000.dwc3` 当前 `state = not attached`（没有主机连接），
+  描述符被内核接受、gadget 绑定成功、ep1/ep2 已建立，但 `ENABLE`（主机 `set_configuration`）这条路径没跑过
+- FunctionFS 要**顶替** `ffs.adb`，不能和系统 `adbd` 并列：两者都宣告 interface 0，
+  系统 USB 栈（`sys.usb.config=adb`）会把 `function0` 抢回去
 - 本机构建是 glibc 静态链接，非发布形态；发布走 CI 的 NDK / bionic
 
 ## 构建
@@ -74,6 +84,21 @@ pty 三项分别在验证：`tty` 报出 `/dev/pts/N`（管道只会说 "not a t
 以及 `kIdWindowSize` 落到 `TIOCSWINSZ`（`stty size` 报出 31 97）。
 
 `bn_test` 与 python `pow()` 逐字节比对；`sig_tool` 做签/验往返。
+
+## USB（M4）踩过的三个坑
+
+调试记录，省得下次再撞：
+
+1. **`ln -s` 进 `configs/b.1/` 报 `Invalid argument`** —— 不是路径写错，是 gadget **已经绑在 UDC 上**。
+   `config_usb_cfg_link()` 在绑定态直接返回 `-EINVAL`。正确顺序是 `echo "" > UDC` → `ln -s` → `echo <udc> > UDC`。
+   MIUI 的 USB 栈会在几十毫秒内把 UDC 抢回去重绑，所以这三步要连在一起做（脚本里有重试）。
+2. **符号链接目标要用绝对路径** —— configfs 解析目标时按**进程 cwd**，不是按链接所在目录；
+   写相对路径会出现 `No such file or directory`。`readlink` 事后看到的
+   `../../../../usb_gadget/g1/functions/...` 是 configfs 自己归一化出来的，不代表你可以那样创建。
+3. **只写描述符不够，还必须写 strings 表** —— 否则 ffs 实例停在 `FFS_READ_STRINGS`，
+   `desc_ready` 永远是 false，`composite_bind()` 让整个 gadget 以 `-ENODEV`（dmesg: `failed to start g1: -19`）失败，
+   而且 `ep1`/`ep2` 也不会出现。我们 `iInterface = 0`，所以写一个 `str_count = lang_count = 0` 的 16 字节空表就够。
+   另外 gadget 每次 UNBIND 后内核会 `ffs_data_reset()` 丢掉描述符集，重绑前得重新写。
 
 ## 许可
 

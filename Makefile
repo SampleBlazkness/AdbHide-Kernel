@@ -9,7 +9,8 @@ CFLAGS  ?= -std=c11 -O2 -Wall -Wextra -I src -D_GNU_SOURCE
 LDFLAGS ?= -static
 
 BUILD  := build
-SRCS_D := src/daemon.c src/shell.c src/sync.c src/util.c src/rsa.c src/keys.c
+SRCS_D := src/daemon.c src/shell.c src/sync.c src/util.c src/rsa.c src/keys.c \
+          src/link.c src/link_ffs.c
 SRCS_T := tests/host_tester.c src/util.c src/rsa.c
 
 .PHONY: all clean test key
