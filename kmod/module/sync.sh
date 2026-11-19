@@ -56,6 +56,15 @@ chown root:root "$TMP" 2>/dev/null
 chmod 600 "$TMP" 2>/dev/null
 mv -f "$TMP" "$UIDS"
 
+# Keep the last good list so post-fs-data.sh still has targets to arm when an
+# unclean shutdown truncates uids.txt. Never overwrite it with an empty list:
+# an empty list means "layer inactive", not "remember nothing".
+if [ -n "$LIST" ]; then
+    LAST=/data/adb/adbhide/uids.last
+    cp -f "$UIDS" "$LAST" 2>/dev/null
+    chmod 600 "$LAST" 2>/dev/null
+fi
+
 if [ -w /proc/adbhide_uids ]; then
     echo "$LIST" >/proc/adbhide_uids 2>>"$LOG"
     echo "$(date) sync: applied [$LIST] -> /proc/adbhide_uids" >>"$LOG"

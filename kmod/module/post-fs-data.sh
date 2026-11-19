@@ -16,13 +16,21 @@ mkdir -p /data/adb/adbhide
 mk_req() {
     # build "target_uids=1,2,3" from the uid file; the kernel never reads files
     _f=/data/adb/adbhide/uids.txt
+    _fb=/data/adb/adbhide/uids.last
     _list=""
-    [ -r "$_f" ] || { echo "$(date) no uid file: $_f" >>"$LOG"; return 1; }
-    while read -r _u; do
-        case "$_u" in ''|*[!0-9]*) continue;; esac
-        _list="${_list:+$_list,}$_u"
-    done <"$_f"
-    [ -n "$_list" ] || { echo "$(date) uid file empty" >>"$LOG"; return 1; }
+    for _src in "$_f" "$_fb"; do
+        [ -r "$_src" ] || continue
+        while read -r _u; do
+            case "$_u" in ''|*[!0-9]*) continue;; esac
+            _list="${_list:+$_list,}$_u"
+        done <"$_src"
+        [ -n "$_list" ] && break
+        echo "$(date) uid list empty in $_src" >>"$LOG"
+    done
+    # An unclean shutdown can leave uids.txt truncated; without a fallback the
+    # module would load with zero targets and stay unhidden until service.sh
+    # runs sync.sh a minute later. uids.last is the previous good list.
+    [ -n "$_list" ] || { echo "$(date) no usable uid list" >>"$LOG"; return 1; }
     echo "target_uids=$_list"
 }
 
