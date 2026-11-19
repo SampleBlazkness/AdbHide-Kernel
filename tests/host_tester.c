@@ -20,6 +20,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 static int g_fd = -1;
@@ -814,6 +815,198 @@ static int handshake(uint32_t n[RSA_LIMBS], uint32_t d[RSA_LIMBS], int bad_signa
     return 1;
 }
 
+/* ---------------- M5b: pending authorization ---------------- */
+
+static int spawn_daemon(const char *usbgwd, const char *keys, const char *state, int *out_fd)
+{
+    int sv[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) return -1;
+    pid_t child = fork();
+    if (child == 0) {
+        close(sv[0]);
+        if (dup2(sv[1], 3) < 0) _exit(3);
+        close(sv[1]);
+        setenv("ADBNG_PRODUCT_NAME", "adbng", 1);
+        setenv("ADBNG_PRODUCT_MODEL", "adbng-self-test", 1);
+        setenv("ADBNG_PRODUCT_DEVICE", "adbng-self-test", 1);
+        setenv("ADBNG_STATE_DIR", state, 1);
+        execl(usbgwd, usbgwd, "--fd", "3", "--keys", keys, (char *)NULL);
+        _exit(4);
+    }
+    close(sv[1]);
+    *out_fd = sv[0];
+    return (int)child;
+}
+
+static void mkdir_p(const char *dir)
+{
+    char t[768];
+    snprintf(t, sizeof t, "%s", dir);
+    for (char *q = t + 1; *q; q++) {
+        if (*q != '/') continue;
+        *q = 0;
+        mkdir(t, 0755);
+        *q = '/';
+    }
+    mkdir(t, 0755);
+}
+
+static int file_has(const char *path, const char *needle)
+{
+    FILE *f = fopen(path, "r");
+    char line[2048];
+    int hit = 0;
+    if (!f) return 0;
+    while (fgets(line, sizeof line, f)) {
+        if (strstr(line, needle)) {
+            hit = 1;
+            break;
+        }
+    }
+    fclose(f);
+    return hit;
+}
+
+/* Offer a key the daemon has never seen, answer the request like the manager
+ * app would, and check the outcome. decision is "allow" or "deny". */
+static int pending_round(const char *usbgwd, const char *tag, const char *decision,
+                         uint32_t n[RSA_LIMBS], uint32_t d[RSA_LIMBS], int expect_auth)
+{
+    const char *td = getenv("ADBNG_TEST_DIR");
+    char state[300], keys[340], req[380], dec[380], devs[380], blob64[1200];
+    char offer[1400];
+    unsigned char token[TOKEN_SIZE];
+    unsigned char blob[PUBKEY_BLOB_SIZE];
+    struct rx r;
+    char fp[17];
+    int fd = -1;
+
+    if (!td || !*td) td = "/tmp";
+    snprintf(state, sizeof state, "%s/pending-%s-%d", td, tag, (int)getpid());
+    snprintf(keys, sizeof keys, "%s/adb_keys", state);
+    snprintf(devs, sizeof devs, "%s/devices.tsv", state);
+    mkdir_p(state);
+    FILE *k = fopen(keys, "w");
+    if (!k) {
+        snprintf(g_why, sizeof g_why, "cannot create %s", keys);
+        return -1;
+    }
+    fclose(k);
+
+    int child = spawn_daemon(usbgwd, keys, state, &fd);
+    if (child < 0) return -1;
+    g_fd = fd;
+
+    if (recv_msg(&r, 10000) != 1 || r.cmd != A_CNXN) goto fail;
+    free(r.data);
+    const char banner[] = "host::features=shell_v2";
+    send_msg(A_CNXN, A_VERSION, A_MAXDATA, banner, sizeof banner);
+    if (recv_msg(&r, 10000) != 1 || r.cmd != A_AUTH || r.a0 != AUTH_TOKEN) goto fail;
+    memcpy(token, r.data, TOKEN_SIZE);
+    free(r.data);
+
+    size_t bl = rsa_make_pubkey_blob(n, blob, sizeof blob);
+    if (bl == 0) goto fail;
+    b64_encode(blob, bl, blob64, sizeof blob64);
+    snprintf(offer, sizeof offer, "%s adbng-test@%s", blob64, tag);
+    send_msg(A_AUTH, AUTH_RSAPUBLICKEY, 0, offer, strlen(offer) + 1);
+
+    /* The unknown key must park the link, not kill it. */
+    if (recv_msg(&r, 10000) != 1 || r.cmd != A_AUTH || r.a0 != AUTH_TOKEN) {
+        snprintf(g_why, sizeof g_why, "daemon did not park the unknown key");
+        goto fail;
+    }
+    memcpy(token, r.data, TOKEN_SIZE);
+    free(r.data);
+
+    key_fingerprint(n, fp);
+    snprintf(req, sizeof req, "%s/pending/%s.req", state, fp);
+    if (access(req, R_OK) != 0) {
+        snprintf(g_why, sizeof g_why, "no pending request file %s", req);
+        goto fail;
+    }
+    if (!file_has(req, "host=adbng-test@")) {
+        snprintf(g_why, sizeof g_why, "pending request has no host label");
+        goto fail;
+    }
+
+    snprintf(dec, sizeof dec, "%s/pending/%s.decision", state, fp);
+    FILE *df = fopen(dec, "w");
+    if (!df) goto fail;
+    fprintf(df, "%s\n", decision);
+    fclose(df);
+
+    if (!strcmp(decision, "deny")) {
+        /* The daemon drops the link and records the refusal. */
+        struct rx d2;
+        int got = recv_msg(&d2, 10000);
+        free(d2.data);
+        if (got > 0) {
+            snprintf(g_why, sizeof g_why, "link survived a deny");
+            goto fail;
+        }
+        if (!file_has(devs, "deny")) {
+            snprintf(g_why, sizeof g_why, "deny not recorded in devices.tsv");
+            goto fail;
+        }
+        if (access(req, F_OK) == 0) {
+            snprintf(g_why, sizeof g_why, "pending request left behind after deny");
+            goto fail;
+        }
+        printf("[host] pending deny: link dropped and recorded\n");
+        close(g_fd);
+        waitpid(child, NULL, 0);
+        return 0;
+    }
+
+    /* allow: the key has to show up in adb_keys (and be reloaded) before the
+     * signature we already have can succeed. */
+    int landed = 0;
+    for (int i = 0; i < 60; i++) {
+        if (file_has(keys, blob64)) {
+            landed = 1;
+            break;
+        }
+        struct timespec ts = {0, 100 * 1000 * 1000};
+        nanosleep(&ts, NULL);
+    }
+    if (!landed) {
+        snprintf(g_why, sizeof g_why, "approved key never reached adb_keys");
+        goto fail;
+    }
+
+    unsigned char sig[RSA_SIG_SIZE];
+    rsa_sign_sha1(n, d, token, TOKEN_SIZE, sig);
+    send_msg(A_AUTH, AUTH_SIGNATURE, 0, sig, sizeof sig);
+    if (recv_msg(&r, 20000) != 1 || r.cmd != A_CNXN) {
+        snprintf(g_why, sizeof g_why, "signature rejected after approval");
+        goto fail;
+    }
+    free(r.data);
+    if (!file_has(devs, "allow")) {
+        snprintf(g_why, sizeof g_why, "allow not recorded in devices.tsv");
+        goto fail;
+    }
+    printf("[host] pending allow: paired and authenticated\n");
+    close(g_fd);
+    waitpid(child, NULL, 0);
+    return expect_auth ? 0 : 0;
+fail:
+    if (fd >= 0) close(fd);
+    kill(child, SIGKILL);
+    waitpid(child, NULL, 0);
+    return -1;
+}
+static int case_pending(uint32_t n[RSA_LIMBS], uint32_t d[RSA_LIMBS], const char *usbgwd)
+{
+    int saved = g_fd;
+    int bad = 0;
+    if (pending_round(usbgwd, "allow", "allow", n, d, 1) != 0) bad = 1;
+    if (pending_round(usbgwd, "deny", "deny", n, d, 0) != 0) bad = 1;
+    g_fd = saved;
+    return bad ? -1 : 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 4) {
@@ -821,11 +1014,19 @@ int main(int argc, char **argv)
         return 2;
     }
     int bad = (argc > 4 && !strcmp(argv[4], "bad"));
+    int pending_mode = (argc > 4 && !strcmp(argv[4], "pending"));
 
     uint32_t n[RSA_LIMBS], d[RSA_LIMBS];
     if (load_hostkey(argv[3], n, d) != 0) {
         fprintf(stderr, "cannot read host key %s\n", argv[3]);
         return 2;
+    }
+
+    if (pending_mode) {
+        /* M5b: unknown host key -> request file -> decision -> key appended */
+        report("auth: pending allow + deny", case_pending(n, d, argv[1]) == 0);
+        printf("[host] RESULT: %d/%d passed\n", g_pass, g_total);
+        return (g_pass == g_total) ? 0 : 1;
     }
 
     int sv[2];
@@ -919,6 +1120,9 @@ int main(int argc, char **argv)
         free(expect);
     }
 
+
+    /* Runs its own short-lived daemons on scratch state dirs, so it comes last. */
+    report("auth: pending allow + deny", case_pending(n, d, (char *)argv[1]) == 0);
     printf("[host] RESULT: %d/%d passed\n", g_pass, g_total);
 
 done:

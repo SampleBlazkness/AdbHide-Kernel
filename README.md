@@ -3,14 +3,15 @@
 自写用户态 ADB **设备端**实现。目标：PC 上用原厂 `adb` 直接连上本机，不经过系统 `adbd`。
 
 > 状态：M4（USB FunctionFS 传输层）已在本机 gadget 上绑定成功，端到端（ENABLE / 真主机）尚未验证；
-> M2（协议核心）+ M3（shell / exec / pty / sync 读方向）proot 与真机各 15/15 回归通过。
-> `sync` 写方向（push）未做。**当前不是可发布形态。**
+> M2 + M3 + M5a（sync 读写双向）+ M5b（配对授权挂起）proot 与真机各 17/17 回归通过。
+> 管理器（开 / 关、gadget 生命周期、配对 UI）未做。**当前不是可发布形态。**
 
 ## 已实现（真的）
 
 - 24 字节 ADB 帧格式，`magic = command ^ 0xFFFFFFFF`，超长包（> `A_MAXDATA`）拒绝
 - `CNXN` 双向 banner 交换
-- `AUTH`：`A_SIGNATURE`（RSA-2048 / SHA-1 / PKCS#1 v1.5 验签）+ `A_RSAPUBLICKEY` 记录指纹，3 轮上限
+- `AUTH`：`A_SIGNATURE`（RSA-2048 / SHA-1 / PKCS#1 v1.5 验签），3 轮上限；
+  未知 host 的 `A_RSAPUBLICKEY` 不再直接断开，而是**挂起等本机决定**（M5b，见下）
 - 通道分配 / `OKAY` / `WRTE` / `CLSE` 语义
 - `adb_keys` 格式解析（自写 bignum + SHA-1 + base64，无 openssl 依赖）
 - 单线程 `poll` 事件循环，每通道双向流控（收 WRTE 回 OKAY，发 WRTE 等 OKAY）
@@ -33,7 +34,8 @@
 ## 未实现（别当真）
 
 - banner 里的机型属性取自 `ADBNG_PRODUCT_*` 环境变量，**不是**读 Android 属性服务
-- 新 host 只记录指纹后断开，**没有**本机确认流程
+- 配对授权没有 UI：usbgwd 只负责挂起并写请求文件，真正的“允许 / 拒绝”由尚未写出来的管理器完成
+- 授权是**一问一答**：同一时刻只挂起一个 host，第二个未知 host 到来会替换掉前一个请求
 - SEND 的白名单是**前缀匹配**，不解析符号链接：白名单内的软链可以把写落在名单外（对 root 客户端只是护栏，不是沙箱）
 - `sync:` 的 SEND 没有断点续传 / 原子替换（`O_TRUNC` 直写），失败时目标文件可能已是半截
 - `sync_v2`（`STA2`/`LIS2`/`SND2`）未做，banner 也**没有**宣告 `sendrecv_v2`，老客户端会退回 v1
@@ -61,7 +63,7 @@ make test-bad # 只跑"签名错误应被拒绝"
 ## 测试
 
 `tests/host_tester.c` 是手写的 host 端，用 `socketpair` 驱动 `usbgwd`，不依赖 USB。
-当前 16 项回归：
+当前 17 项回归：
 
 ```
 [host] PASS handshake + auth
@@ -80,7 +82,8 @@ make test-bad # 只跑"签名错误应被拒绝"
 [host] PASS sync: RECV 200 KB
 [host] PASS sync: SEND outside roots denied
 [host] PASS sync: SEND 200 KB push
-[host] RESULT: 16/16 passed
+[host] PASS auth: pending allow + deny
+[host] RESULT: 17/17 passed
 ```
 
 pty 三项分别在验证：`tty` 报出 `/dev/pts/N`（管道只会说 "not a tty"）、
@@ -88,6 +91,31 @@ pty 三项分别在验证：`tty` 报出 `/dev/pts/N`（管道只会说 "not a t
 以及 `kIdWindowSize` 落到 `TIOCSWINSZ`（`stty size` 报出 31 97）。
 
 `bn_test` 与 python `pow()` 逐字节比对；`sig_tool` 做签/验往返。
+
+最后一项跑两个一次性 daemon（各自 scratch 状态目录）：一个走“允许”，
+验证 `pending/<fp>.req` 被写出、decision 落地后密钥进了 `adb_keys` 且**重新加载**、
+随后签名直接通过并拿到 `CNXN`；另一个走“拒绝”，验证链路被断开、`devices.tsv` 记了 `deny`、
+请求文件被清掉。
+
+## 配对授权（M5b）
+
+```
+host: AUTH(RSAPUBLICKEY)  ← 未知 key
+usbgwd: 写 /data/adb/adbng/pending/<fp>.req，回 AUTH(TOKEN) 继续吊住
+        （host 会不停重试签名，每次都被回 TOKEN）
+manager: 写 /data/adb/adbng/pending/<fp>.decision = "allow" | "deny"
+usbgwd: allow → 追加到 adb_keys + 重新加载 → host 下一次签名就过
+        deny  → 记 devices.tsv 并断开
+        120s 没决定 → 断开，**不记录**（用户没做选择）
+host 中途拔掉 → .req/.decision 清掉，不记录
+```
+
+`<fp>.req` 是 `key=value` 三行（`fingerprint` / `host` / `since`），故意不用 JSON：
+管理器 split 一下就能读。`devices.tsv` 每条决定一行：
+`<epoch>	<fp>	<allow|deny>	<user@host>`。
+
+状态目录可用 `ADBNG_STATE_DIR` 覆盖（默认 `/data/adb/adbng`），回归就是靠它把状态指到临时目录。
+首次安装 `adb_keys` 为空也能启动：不再当致命错误，直接进配对流程。
 
 ## USB（M4）踩过的三个坑
 

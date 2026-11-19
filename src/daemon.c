@@ -6,8 +6,11 @@
  * M3: single-threaded poll loop, per-channel flow control, `shell:` (v1 and
  *     v2 sub-packets, optional pty) and `exec:`.
  * M4: the transport is pluggable - byte stream (socketpair) or USB FunctionFS.
+ * M5a: sync: write direction (SEND) behind a write-root allow-list.
+ * M5b: host authorization - an unknown host key parks the link and waits for a
+ *      decision from the manager app instead of being dropped immediately.
  *
- * Still missing: sync: write direction, forward:.
+ * Still missing: forward:, and the controller that owns the gadget lifecycle.
  */
 #include "keys.h"
 #include "link.h"
@@ -15,7 +18,6 @@
 #include "shell.h"
 #include "sync.h"
 #include "util.h"
-
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -23,7 +25,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MAX_CHANNELS 16
@@ -80,6 +84,158 @@ static struct key_store g_keys;
 static unsigned char g_token[TOKEN_SIZE];
 static int g_auth_state;
 static int g_token_rounds;
+
+/* ---- M5b: host authorization ---------------------------------------------
+ * An unknown host key parks the link instead of being dropped: we publish
+ * /data/adb/adbng/pending/<fp>.req and keep answering AUTH TOKEN until the
+ * manager writes <fp>.decision with "allow" or "deny".  allow appends the key
+ * to adb_keys and reloads it, so the host's next signature just works; deny or
+ * a timeout drops the link.  A host that disappears mid-question simply leaves
+ * no .req behind, which is what makes the dialog go away.
+ */
+#define ADBNG_DIR        "/data/adb/adbng"
+#define PENDING_SECONDS  120
+
+static const char *g_keys_path;
+static char g_pend_fp[17];
+static char g_pend_b64[1024];
+static char g_pend_host[128];
+static time_t g_pend_since;
+static int g_pend_active;
+
+/* Every path below hangs off one directory so a self-test can point the whole
+ * state at a scratch dir instead of the real /data/adb/adbng. */
+static char g_state_dir[192] = ADBNG_DIR;
+static char g_pending_dir[224] = ADBNG_DIR "/pending";
+static char g_devices_file[224] = ADBNG_DIR "/devices.tsv";
+
+static void mkdir_p(const char *dir);
+
+static void state_init(void)
+{
+    const char *e = getenv("ADBNG_STATE_DIR");
+    if (!e || !*e) return;
+    snprintf(g_state_dir, sizeof g_state_dir, "%s", e);
+    snprintf(g_pending_dir, sizeof g_pending_dir, "%s/pending", g_state_dir);
+    snprintf(g_devices_file, sizeof g_devices_file, "%s/devices.tsv", g_state_dir);
+    mkdir_p(g_state_dir);
+}
+
+static void mkdir_p(const char *dir)
+{
+    char tmp[256];
+    size_t l;
+
+    snprintf(tmp, sizeof tmp, "%s", dir);
+    l = strlen(tmp);
+    for (size_t i = 1; i < l; i++) {
+        if (tmp[i] != '/') continue;
+        tmp[i] = 0;
+        mkdir(tmp, 0755);
+        tmp[i] = '/';
+    }
+    mkdir(tmp, 0755);
+}
+
+static void pend_publish(void)
+{
+    char p[256];
+    FILE *f;
+
+    mkdir_p(g_pending_dir);
+    snprintf(p, sizeof p, "%s/%s.req", g_pending_dir, g_pend_fp);
+    f = fopen(p, "w");
+    if (!f) {
+        logmsg("pending: cannot write %s: %s", p, strerror(errno));
+        return;
+    }
+    /* key=value lines, no JSON: the manager parses this by splitting on '=' */
+    fprintf(f, "fingerprint=%s\nhost=%s\nsince=%ld\n", g_pend_fp, g_pend_host,
+            (long)g_pend_since);
+    fclose(f);
+    logmsg("pending: published %s (host=%s)", p, g_pend_host);
+}
+
+static void pend_clear(void)
+{
+    char p[256];
+
+    if (!g_pend_active) return;
+    snprintf(p, sizeof p, "%s/%s.req", g_pending_dir, g_pend_fp);
+    unlink(p);
+    snprintf(p, sizeof p, "%s/%s.decision", g_pending_dir, g_pend_fp);
+    unlink(p);
+    g_pend_active = 0;
+}
+
+static void dev_record(const char *fp, const char *host, const char *decision)
+{
+    char safe[128];
+    size_t n = 0;
+    FILE *f;
+
+    /* one TSV line per decision: ts <tab> fp <tab> allow|deny <tab> host */
+    for (const char *s = host; *s && n < sizeof safe - 1; s++)
+        safe[n++] = (*s == ' ' || *s == '\t') ? '_' : *s;
+    safe[n] = 0;
+
+    mkdir_p(g_state_dir);
+    f = fopen(g_devices_file, "a");
+    if (!f) {
+        logmsg("devices: cannot append to %s: %s", g_devices_file, strerror(errno));
+        return;
+    }
+    fprintf(f, "%ld\t%s\t%s\t%s\n", (long)time(NULL), fp, decision, safe);
+    fclose(f);
+}
+
+/* Returns 0 to keep the link, -1 to drop it. */
+static int pend_tick(void)
+{
+    char p[256];
+    char line[32];
+    FILE *f;
+
+    if (!g_pend_active) return 0;
+
+    snprintf(p, sizeof p, "%s/%s.decision", g_pending_dir, g_pend_fp);
+    f = fopen(p, "r");
+    if (f) {
+        if (!fgets(line, sizeof line, f)) line[0] = 0;
+        fclose(f);
+
+        if (!strncmp(line, "allow", 5)) {
+            FILE *k = g_keys_path ? fopen(g_keys_path, "a") : NULL;
+            if (!k) {
+                logmsg("pending: cannot append to %s", g_keys_path ? g_keys_path : "?");
+                dev_record(g_pend_fp, g_pend_host, "deny");
+                pend_clear();
+                return -1;
+            }
+            fprintf(k, "%s %s\n", g_pend_b64, g_pend_host);
+            fclose(k);
+            keys_load(g_keys_path, &g_keys);
+            dev_record(g_pend_fp, g_pend_host, "allow");
+            logmsg("pending: allowed %s, waiting for a fresh signature", g_pend_fp);
+            pend_clear();
+            return 0;
+        }
+
+        /* anything that is not "allow" is a deny */
+        dev_record(g_pend_fp, g_pend_host, "deny");
+        logmsg("pending: denied %s", g_pend_fp);
+        pend_clear();
+        return -1;
+    }
+
+    if (time(NULL) - g_pend_since > PENDING_SECONDS) {
+        logmsg("pending: no decision for %s after %ds, dropping", g_pend_fp,
+               PENDING_SECONDS);
+        pend_clear();       /* not recorded: the user never chose */
+        return -1;
+    }
+    return 0;
+}
 static struct channel g_chan[MAX_CHANNELS];
 static uint32_t g_next_id = 1;
 
@@ -402,23 +558,61 @@ static int on_auth(const struct amessage *m, const unsigned char *data)
             return 0;
         }
         logmsg("auth: signature rejected (%d round(s))", g_token_rounds);
-        if (g_token_rounds >= 3) return -1;
-        send_token();
-        return 0;
+        /* While a key is waiting for approval the host must stay connected:
+         * a real adb client keeps retrying its signature until we answer. */
+        if (g_pend_active || g_token_rounds < 3) {
+            send_token();
+            return 0;
+        }
+        return -1;
     }
 
     if (m->arg0 == AUTH_RSAPUBLICKEY) {
-        /* Unknown host.  Our model never trusts one silently: log the
-         * fingerprint and drop the link until the user confirms (M6). */
         char line[1200];
+        char host[128] = "unknown";
+        unsigned char blob[1024];
+        uint32_t mod[RSA_LIMBS];
+        char fp[17];
         size_t n = m->data_length < sizeof line - 1 ? m->data_length : sizeof line - 1;
+
+        /* "<base64 key> <user>@<host>" - the trailing tag becomes the label we
+         * store in adb_keys, exactly like /data/misc/adb/adb_keys does. */
         memcpy(line, data, n);
         line[n] = 0;
+
         char *sp = strchr(line, ' ');
-        if (sp) *sp = 0;
-        logmsg("auth: unknown host key offered, needs local confirmation");
-        logmsg("auth: key = %s", line);
-        return -1;
+        if (sp) {
+            char *tag = sp + 1;
+            while (*tag == ' ') tag++;
+            snprintf(host, sizeof host, "%s", tag);
+            *sp = 0;
+        }
+        if (line[0] == 0 || strlen(line) >= sizeof g_pend_b64) {
+            logmsg("auth: offered key is empty or too long");
+            return -1;
+        }
+        int bl = b64_decode(line, blob, sizeof blob);
+        if (bl <= 0 || rsa_modulus_from_pubkey_blob(blob, (size_t)bl, mod) != 0) {
+            logmsg("auth: offered key is not a usable RSA public key");
+            return -1;
+        }
+        key_fingerprint(mod, fp);
+
+        if (g_pend_active && !strcmp(fp, g_pend_fp)) {
+            send_token();           /* same host asking again */
+            return 0;
+        }
+
+        pend_clear();
+        snprintf(g_pend_fp, sizeof g_pend_fp, "%s", fp);
+        snprintf(g_pend_b64, sizeof g_pend_b64, "%s", line);
+        snprintf(g_pend_host, sizeof g_pend_host, "%s", host);
+        g_pend_since = time(NULL);
+        g_pend_active = 1;
+        logmsg("auth: host %s (%s) is waiting for approval", fp, host);
+        pend_publish();
+        send_token();
+        return 0;
     }
 
     logmsg("auth: unexpected sub-command %u", m->arg0);
@@ -676,12 +870,16 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: usbgwd (--fd N | --ffs DIR) --keys PATH\n");
         return 2;
     }
+    state_init();
     g_link = ffs_path ? link_ffs(ffs_path) : link_fd(fd);
 
+    g_keys_path = keys_path;
     int kcount = keys_load(keys_path, &g_keys);
     if (kcount <= 0) {
-        logmsg("no usable host key in %s", keys_path);
-        return 1;
+        /* Not fatal: a fresh install pairs its first host through the
+         * pending-authorization flow instead of needing a key upfront. */
+        logmsg("no usable host key in %s, waiting for the first pairing", keys_path);
+        kcount = 0;
     }
     logmsg("usbgwd start: link=%s keys=%d", g_link->name, kcount);
 
@@ -749,6 +947,9 @@ int main(int argc, char **argv)
             }
         }
 
+        /* A pending authorization needs a heartbeat: the decision file is
+         * polled, not signalled. */
+        if (g_pend_active && timeout < 0) timeout = 1000;
         int pr = poll(pfds, (nfds_t)nfds, timeout);
         if (pr < 0) {
             if (errno == EINTR) continue;
@@ -783,7 +984,11 @@ int main(int argc, char **argv)
             logmsg("link closed");
             break;
         }
-
+        /* A parked host waits for a decision file written by the manager. */
+        if (g_pend_active && pend_tick() < 0) {
+            logmsg("pending: dropping link");
+            break;
+        }
         for (int i = link_n; i < nfds; i++) {
             if (!pfds[i].revents) continue;
             if (!map[i].c || !map[i].c->used) continue;
@@ -820,6 +1025,7 @@ int main(int argc, char **argv)
         }
     }
 
+    pend_clear();          /* a question that lost its host must not linger */
     for (int i = 0; i < MAX_CHANNELS; i++)
         if (g_chan[i].used) chan_release(&g_chan[i]);
     g_link->shutdown();
