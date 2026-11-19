@@ -2,8 +2,15 @@
  *
  * Child process plumbing shared by the `shell:` and `exec:` services.
  *
- * Both run the child in its own session (setsid) so a killed shell does not
- * take the daemon with it and so we can signal the whole group on close.
+ * Two wirings are supported:
+ *
+ *   pipes - separate stdin/stdout(/stderr).  Used by `shell:` without pty,
+ *           by `exec:` and by every non-interactive path.
+ *   pty   - one pseudo-terminal for the child.  isatty() is true, the line
+ *           discipline turns ^C into SIGINT, and full-screen programs work.
+ *
+ * Either way the child runs in its own session (setsid), so a killed shell
+ * does not take the daemon with it and we can signal the whole group.
  */
 #include "shell.h"
 #include "util.h"
@@ -11,12 +18,17 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <unistd.h>
 
 #define DEFAULT_PATH "/sbin:/system/sbin:/system/bin:/system/xbin:/usr/local/bin:/usr/bin:/bin"
+#define DEFAULT_ROWS 24
+#define DEFAULT_COLS 80
 
 void shell_proc_init(struct shell_proc *p)
 {
@@ -24,6 +36,7 @@ void shell_proc_init(struct shell_proc *p)
     p->fd_in = -1;
     p->fd_out = -1;
     p->fd_err = -1;
+    p->pty = 0;
 }
 
 static int make_pipe(int fds[2])
@@ -45,18 +58,35 @@ static void set_nonblock(int fd)
     if (fl >= 0) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
 }
 
-static void child_env(void)
+struct spawn_ctx {
+    void (*body)(void *);
+    void *arg;
+    const char *term;
+    int pty;
+};
+
+static void child_env(const struct spawn_ctx *ctx)
 {
     setenv("PATH", DEFAULT_PATH, 1);
     if (!getenv("HOME")) setenv("HOME", "/", 1);
-    if (!getenv("TERM")) setenv("TERM", "dumb", 1);
+    if (ctx->term && *ctx->term) {
+        setenv("TERM", ctx->term, 1);
+    } else if (!getenv("TERM")) {
+        /* "dumb" would be honest for pipes but kills every colour and
+         * cursor-addressing program on a terminal. */
+        setenv("TERM", ctx->pty ? "xterm-256color" : "dumb", 1);
+    }
 }
 
-/* Shared fork + wiring.  Returns 0 on success with the parent-side fds filled
- * in; the caller then execs in the child.  Because exec happens in the child
- * branch we duplicate the child setup here rather than passing callbacks. */
-static int spawn_common(int separate_err, struct shell_proc *p,
-                        void (*child_body)(void *arg), void *arg)
+/* Everything a fresh child must undo before it becomes somebody else's
+ * process: daemon signal policy, inherited descriptors of the other kind. */
+static void child_reset_signals(void)
+{
+    signal(SIGPIPE, SIG_DFL);
+    signal(SIGCHLD, SIG_DFL);
+}
+
+static int spawn_pipes(const struct spawn_ctx *ctx, int separate_err, struct shell_proc *p)
 {
     int in_pipe[2] = { -1, -1 }, out_pipe[2] = { -1, -1 }, err_pipe[2] = { -1, -1 };
 
@@ -72,14 +102,9 @@ static int spawn_common(int separate_err, struct shell_proc *p,
         if (dup2(in_pipe[0], 0) < 0) _exit(127);
         if (dup2(out_pipe[1], 1) < 0) _exit(127);
         if (dup2(separate_err ? err_pipe[1] : out_pipe[1], 2) < 0) _exit(127);
-
-        /* Signal handling must go back to defaults: the daemon ignores
-         * SIGPIPE and we do not want that inherited by a shell. */
-        signal(SIGPIPE, SIG_DFL);
-        signal(SIGCHLD, SIG_DFL);
-        child_env();
-
-        child_body(arg);
+        child_reset_signals();
+        child_env(ctx);
+        ctx->body(ctx->arg);
         _exit(127);
     }
 
@@ -87,6 +112,7 @@ static int spawn_common(int separate_err, struct shell_proc *p,
     p->fd_in = in_pipe[1];
     p->fd_out = out_pipe[0];
     p->fd_err = separate_err ? err_pipe[0] : -1;
+    p->pty = 0;
     set_nonblock(p->fd_in);
     set_nonblock(p->fd_out);
     set_nonblock(p->fd_err);
@@ -105,6 +131,81 @@ fail:
     return -1;
 }
 
+/* Open a pty master without libutil: /dev/ptmx + TIOCSPTLCK/TIOCGPTN behaves
+ * the same on glibc, musl and bionic, which posix_openpt() does not promise.
+ * The slave name is written into `path`. */
+static int pty_master_open(char *path, size_t pathlen)
+{
+    int master = open("/dev/ptmx", O_RDWR | O_NOCTTY | O_CLOEXEC);
+    if (master < 0) return -1;
+
+    int unlock = 0;
+    if (ioctl(master, TIOCSPTLCK, &unlock) != 0) { close(master); return -1; }
+
+    int ptn = -1;
+    if (ioctl(master, TIOCGPTN, &ptn) != 0 || ptn < 0) { close(master); return -1; }
+
+    int n = snprintf(path, pathlen, "/dev/pts/%d", ptn);
+    if (n <= 0 || (size_t)n >= pathlen) { close(master); return -1; }
+    return master;
+}
+
+int shell_pty_winsize(int fd, int rows, int cols)
+{
+    if (fd < 0) return -1;
+    struct winsize ws;
+    memset(&ws, 0, sizeof ws);
+    ws.ws_row = (unsigned short)(rows > 0 ? rows : DEFAULT_ROWS);
+    ws.ws_col = (unsigned short)(cols > 0 ? cols : DEFAULT_COLS);
+    return ioctl(fd, TIOCSWINSZ, &ws);
+}
+
+static int spawn_pty(const struct spawn_ctx *ctx, int rows, int cols, struct shell_proc *p)
+{
+    char slave_path[64];
+    int master = pty_master_open(slave_path, sizeof slave_path);
+    if (master < 0) return -1;
+
+    int slave = open(slave_path, O_RDWR | O_NOCTTY | O_CLOEXEC);
+    if (slave < 0) { close(master); return -1; }
+
+    /* Set the size before the child can run, so the very first program already
+     * sees the size the host asked for. */
+    shell_pty_winsize(master, rows, cols);
+
+    pid_t pid = fork();
+    if (pid < 0) { close(master); close(slave); return -1; }
+
+    if (pid == 0) {
+        close(master);
+        setsid();
+        /* Acquiring the controlling terminal is the whole point: only then
+         * does the line discipline signal this process group on ^C/^\\/^Z. */
+        ioctl(slave, TIOCSCTTY, 0);
+        if (dup2(slave, 0) < 0) _exit(127);
+        if (dup2(slave, 1) < 0) _exit(127);
+        if (dup2(slave, 2) < 0) _exit(127);
+        if (slave > 2) close(slave);
+        child_reset_signals();
+        child_env(ctx);
+        ctx->body(ctx->arg);
+        _exit(127);
+    }
+
+    /* The parent must not keep the slave open: as long as it does, read() on
+     * the master returns EAGAIN after the child dies instead of EIO, and we
+     * would never notice EOF. */
+    close(slave);
+    set_nonblock(master);
+
+    p->pid = pid;
+    p->fd_in = master;
+    p->fd_out = master;
+    p->fd_err = -1;
+    p->pty = 1;
+    return 0;
+}
+
 struct sh_arg {
     const char *cmd;
 };
@@ -120,10 +221,20 @@ static void child_sh(void *arg)
     execlp("sh", "sh", "-c", a->cmd, (char *)NULL);
 }
 
-int shell_spawn_sh(const char *cmd, int separate_err, struct shell_proc *p)
+int shell_spawn_sh(const struct shell_opts *o, struct shell_proc *p)
 {
-    struct sh_arg a = { .cmd = cmd };
-    return spawn_common(separate_err, p, child_sh, &a);
+    struct sh_arg a = { .cmd = o->cmd };
+    struct spawn_ctx ctx = { .body = child_sh, .arg = &a, .term = o->term, .pty = 0 };
+
+    if (o->pty) {
+        ctx.pty = 1;
+        if (spawn_pty(&ctx, o->rows, o->cols, p) == 0) return 0;
+        /* No pty available: a pipe-backed shell is still far better than
+         * refusing the channel outright. */
+        logmsg("shell: pty unavailable (%s), falling back to pipes", strerror(errno));
+        ctx.pty = 0;
+    }
+    return spawn_pipes(&ctx, o->separate_err, p);
 }
 
 struct argv_arg {
@@ -140,13 +251,17 @@ static void child_argv(void *arg)
 int shell_spawn_argv(char *const argv[], int separate_err, struct shell_proc *p)
 {
     struct argv_arg a = { .argv = argv };
-    return spawn_common(separate_err, p, child_argv, &a);
+    struct spawn_ctx ctx = { .body = child_argv, .arg = &a, .term = NULL, .pty = 0 };
+    return spawn_pipes(&ctx, separate_err, p);
 }
 
 void shell_kill(struct shell_proc *p)
 {
-    if (p->fd_in >= 0) { close(p->fd_in); p->fd_in = -1; }
-    if (p->fd_out >= 0) { close(p->fd_out); p->fd_out = -1; }
+    int in = p->fd_in, out = p->fd_out;
+    if (in >= 0) { close(in); p->fd_in = -1; }
+    /* With a pty both directions are the same descriptor. */
+    if (out >= 0 && out != in) { close(out); }
+    p->fd_out = -1;
     if (p->fd_err >= 0) { close(p->fd_err); p->fd_err = -1; }
 
     if (p->pid > 0) {

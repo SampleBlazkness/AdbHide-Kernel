@@ -318,6 +318,99 @@ fail:
     return -1;
 }
 
+/* One shell_v2 sub-packet as host -> device stdin.  The device acks every
+ * WRTE with OKAY, which pump() throws away. */
+static void send_sub(struct chan *ch, int stream, const void *d, size_t n)
+{
+    unsigned char buf[5 + 64];
+    if (n > 64) n = 64;
+    uint32_t l = (uint32_t)n;
+    buf[0] = (unsigned char)stream;
+    buf[1] = (unsigned char)(l & 0xff);
+    buf[2] = (unsigned char)((l >> 8) & 0xff);
+    buf[3] = (unsigned char)((l >> 16) & 0xff);
+    buf[4] = (unsigned char)((l >> 24) & 0xff);
+    if (n) memcpy(buf + 5, d, n);
+    send_msg(A_WRTE, ch->my_id, ch->dev_id, buf, n + 5);
+}
+
+/* pty: the child has to come up on a real terminal.  `tty` prints the device
+ * name only when stdin is one; through a pipe it says "not a tty". */
+static int case_pty(void)
+{
+    struct chan ch;
+    struct sink s;
+    memset(&s, 0, sizeof s);
+
+    const char svc[] = "shell,v2,pty,raw:tty";
+    int rc = open_service(svc, sizeof svc, &ch);
+    CHECK(rc == 0, "open failed rc=%d", rc);
+    CHECK(pump(&ch, &s, 1, 20000) == 0, "%s", g_why);
+
+    CHECK(s.outlen && memmem(s.out, s.outlen, "/dev/pts/", 9) != NULL,
+          "stdout has no /dev/pts: '%.*s'", (int)s.outlen, s.out ? (char *)s.out : "");
+    CHECK(s.have_exit && s.exit_code == 0, "exit code %d", s.exit_code);
+    sink_free(&s);
+    return 0;
+fail:
+    sink_free(&s);
+    return -1;
+}
+
+/* The point of the controlling terminal: 0x03 must become SIGINT.  Through a
+ * pipe this byte is just data, so `sleep 60` would run to completion. */
+static int case_pty_ctrl_c(void)
+{
+    struct chan ch;
+    struct sink s;
+    memset(&s, 0, sizeof s);
+
+    const char svc[] = "shell,v2,pty,raw:sleep 60";
+    int rc = open_service(svc, sizeof svc, &ch);
+    CHECK(rc == 0, "open failed rc=%d", rc);
+
+    usleep(300000);                    /* let the child reach exec */
+    const unsigned char ctrl_c = 0x03;
+    send_sub(&ch, 0, &ctrl_c, 1);
+
+    CHECK(pump(&ch, &s, 1, 10000) == 0, "%s", g_why);
+    CHECK(s.have_exit && s.exit_code == 130, "exit code %d, expected 130", s.exit_code);
+    sink_free(&s);
+    return 0;
+fail:
+    sink_free(&s);
+    return -1;
+}
+
+/* Window size arrives as its own sub-packet; stty has to see it.  An
+ * interactive shell is used so the size is set before the command runs. */
+static int case_pty_winsize(void)
+{
+    struct chan ch;
+    struct sink s;
+    memset(&s, 0, sizeof s);
+
+    const char svc[] = "shell,v2,pty,raw:";
+    int rc = open_service(svc, sizeof svc, &ch);
+    CHECK(rc == 0, "open failed rc=%d", rc);
+
+    const unsigned char ws[8] = { 31, 0, 97, 0, 0, 0, 0, 0 };   /* 31 rows, 97 cols */
+    send_sub(&ch, 5, ws, sizeof ws);
+    usleep(300000);
+    send_sub(&ch, 0, "stty size\n", 10);
+    usleep(300000);
+    send_sub(&ch, 0, "exit\n", 5);
+
+    CHECK(pump(&ch, &s, 1, 20000) == 0, "%s", g_why);
+    CHECK(memmem(s.out, s.outlen, "31 97", 5) != NULL, "stdout has no '31 97': '%.*s'",
+          (int)s.outlen, s.out ? (char *)s.out : "");
+    sink_free(&s);
+    return 0;
+fail:
+    sink_free(&s);
+    return -1;
+}
+
 /* exec: takes a NUL-separated argv, no shell, so the space must survive as
  * part of a single argument. */
 static int case_exec(void)
@@ -693,6 +786,9 @@ int main(int argc, char **argv)
         report("shell: v2 stdout/stderr/exit", case_shell_v2() == 0);
         report("shell: v2 300 KB chunked output", case_big_output() == 0);
         report("shell: v2 stdin", case_stdin() == 0);
+        report("shell: pty is a tty", case_pty() == 0);
+        report("shell: pty ^C -> SIGINT", case_pty_ctrl_c() == 0);
+        report("shell: pty window size", case_pty_winsize() == 0);
         report("exec: NUL-separated argv", case_exec() == 0);
         report("shell: command not found -> 127", case_not_found() == 0);
         report("refused service -> CLSE", case_refused() == 0);

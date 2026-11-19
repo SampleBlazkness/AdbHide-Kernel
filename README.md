@@ -2,8 +2,8 @@
 
 自写用户态 ADB **设备端**实现。目标：PC 上用原厂 `adb` 直接连上本机，不经过系统 `adbd`。
 
-> 状态：M2（协议核心）+ M3（shell / exec / sync 读方向）完成，真机 12/12 回归通过。
-> 写方向（push）与 pty 未做。**当前不是可发布形态。**
+> 状态：M2（协议核心）+ M3（shell / exec / pty / sync 读方向）完成，proot 与真机各 15/15 回归通过。
+> `sync` 写方向（push）未做。**当前不是可发布形态。**
 
 ## 已实现（真的）
 
@@ -15,6 +15,8 @@
 - 单线程 `poll` 事件循环，每通道双向流控（收 WRTE 回 OKAY，发 WRTE 等 OKAY）
 - `shell:` v1（stdout/stderr 合并，无退出码）
 - `shell,v2,raw:` 子包格式（stdout/stderr 分流 + 退出码）
+- `shell,pty:` / `shell,v2,pty:` 真伪终端：`/dev/ptmx` 直接开、`setsid` + `TIOCSCTTY` 取得控制终端（^C/^\/^Z 变成 `SIGINT`/`SIGQUIT`/`SIGTSTP`）、`kIdCloseStdin` 用 tty EOF 字符表达半关闭、`kIdWindowSize` 走 `TIOCSWINSZ` 并触发 `SIGWINCH`；pty 不可用时自动降级为管道
+- `TERM=` 子服务参数透传到子进程环境；pty 默认 `xterm-256color`，管道默认 `dumb`
 - `exec:`（NUL 分隔 argv，不过 shell，参数原样透传）
 - `sync:` v1 **只读**：`STAT` / `LIST` / `RECV`，`DATA`…`DONE` 分帧，`QUIT` 收尾
 - 未识别服务 → `CLSE` 拒绝
@@ -25,7 +27,6 @@
 - 新 host 只记录指纹后断开，**没有**本机确认流程
 - **`sync:` 的 SEND（push）明确拒绝**：那是 root 级写文件能力，等 M5 的授权层就位再做
 - `sync_v2`（`STA2`/`LIS2`/`SND2`）未做，banner 也**没有**宣告 `sendrecv_v2`，老客户端会退回 v1
-- pty 未实现：请求 `pty` 时降级为管道，交互式 `adb shell` 的体验会不一样
 - `forward:` / `reboot:` / `root:` 仍走拒绝分支
 - **仅 socketpair transport，没有 FunctionFS** → PC 现在还连不上
 - 本机构建是 glibc 静态链接，非发布形态；发布走 CI 的 NDK / bionic
@@ -47,7 +48,7 @@ make test-bad # 只跑"签名错误应被拒绝"
 ## 测试
 
 `tests/host_tester.c` 是手写的 host 端，用 `socketpair` 驱动 `usbgwd`，不依赖 USB。
-当前 12 项回归：
+当前 15 项回归：
 
 ```
 [host] PASS handshake + auth
@@ -55,6 +56,9 @@ make test-bad # 只跑"签名错误应被拒绝"
 [host] PASS shell: v2 stdout/stderr/exit
 [host] PASS shell: v2 300 KB chunked output
 [host] PASS shell: v2 stdin
+[host] PASS shell: pty is a tty
+[host] PASS shell: pty ^C -> SIGINT
+[host] PASS shell: pty window size
 [host] PASS exec: NUL-separated argv
 [host] PASS shell: command not found -> 127
 [host] PASS refused service -> CLSE
@@ -62,8 +66,12 @@ make test-bad # 只跑"签名错误应被拒绝"
 [host] PASS sync: LIST
 [host] PASS sync: RECV 200 KB
 [host] PASS sync: SEND refused (read-only)
-[host] RESULT: 12/12 passed
+[host] RESULT: 15/15 passed
 ```
+
+pty 三项分别在验证：`tty` 报出 `/dev/pts/N`（管道只会说 "not a tty"）、
+`0x03` 变成 `SIGINT`（`sleep 60` 被杀掉、退出码 130；管道下这个字节只是数据）、
+以及 `kIdWindowSize` 落到 `TIOCSWINSZ`（`stty size` 报出 31 97）。
 
 `bn_test` 与 python `pow()` 逐字节比对；`sig_tool` 做签/验往返。
 

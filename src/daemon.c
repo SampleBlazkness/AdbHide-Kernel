@@ -4,9 +4,9 @@
  *
  * M2: framing, CNXN banner, AUTH, channel multiplexing.
  * M3: single-threaded poll loop, per-channel flow control, `shell:` (v1 and
- *     v2 sub-packets) and `exec:`.
+ *     v2 sub-packets, optional pty) and `exec:`.
  *
- * Still missing: sync:, forward:, pty allocation, transport != socketpair.
+ * Still missing: sync: write direction, forward:, transport != socketpair.
  */
 #include "keys.h"
 #include "proto.h"
@@ -32,6 +32,12 @@
 #define SUB_STDOUT 1
 #define SUB_STDERR 2
 #define SUB_EXIT   3
+#define SUB_CLOSE_STDIN 4
+#define SUB_WINDOW_SIZE 5
+
+/* The tty EOF character.  A pty cannot be half-closed, so `kIdCloseStdin`
+ * becomes this byte and the line discipline turns it into read() == 0. */
+#define PTY_EOF 0x04
 
 #define EV_LINK  0
 #define EV_STDOUT 1
@@ -49,6 +55,8 @@ struct channel {
     char name[256];
     int kind;
     int v2;                        /* host asked for shell_v2 sub-packets */
+    int pty;                       /* fd_in is a pty master (== fd_out) */
+    int rows, cols;                /* last window size the host reported */
     pid_t pid;
     int fd_in;                     /* us -> child stdin */
     int fd_out;                    /* child stdout -> us */
@@ -56,6 +64,7 @@ struct channel {
     unsigned char *inbuf;          /* host stdin bytes not yet written */
     size_t inlen;
     size_t incap;
+    int stdin_done;                /* host closed stdin (v2 kIdCloseStdin) */
     int can_send;                  /* flow control credit from the host */
     int eof_out;
     int eof_err;
@@ -195,8 +204,40 @@ static int append_input(struct channel *c, const unsigned char *d, size_t n)
     return 0;
 }
 
+/* Host half-closed stdin.  A pipe can just be closed; a pty cannot, because
+ * the same descriptor also carries the output we still have to deliver.  The
+ * tty EOF character is the protocol's own answer: in canonical mode read()
+ * returns 0 for the reader, exactly like a pipe EOF.  It is appended to the
+ * pending input so it stays behind anything the host already sent. */
+static void close_stdin(struct channel *c)
+{
+    if (c->stdin_done) return;
+    c->stdin_done = 1;
+
+    if (c->pty) {
+        unsigned char eof = PTY_EOF;
+        if (c->fd_in < 0 || append_input(c, &eof, 1) != 0) c->inlen = 0;
+        return;
+    }
+    if (c->fd_in >= 0) { close(c->fd_in); c->fd_in = -1; }
+    c->inlen = 0;
+}
+
+/* ioctl(TIOCSWINSZ) makes the kernel send SIGWINCH to the foreground process
+ * group by itself, so nothing else is needed here. */
+static void chan_winsize(struct channel *c, int rows, int cols)
+{
+    if (rows <= 0 || cols <= 0) return;
+    c->rows = rows;
+    c->cols = cols;
+    if (!c->pty) return;
+    shell_pty_winsize(c->fd_in >= 0 ? c->fd_in : c->fd_out, rows, cols);
+}
+
 /* "shell[,v2][,raw][,pty][,TERM=x]:cmd" — the argument region is everything
- * between the service name and the first colon. */
+ * between the service name and the first colon.  Unknown flags are ignored on
+ * purpose: the host adds new ones over time and refusing a channel because of
+ * one we do not care about is worse than dropping it. */
 static void open_shell(const char *name, uint32_t host_id)
 {
     const char *colon = strchr(name, ':');
@@ -207,21 +248,32 @@ static void open_shell(const char *name, uint32_t host_id)
     args[arglen] = 0;
 
     int v2 = 0, pty = 0;
+    const char *term = NULL;
     char *save = NULL;
     for (char *t = strtok_r(args, ",", &save); t; t = strtok_r(NULL, ",", &save)) {
         if (!strcmp(t, "v2")) v2 = 1;
         else if (!strcmp(t, "pty")) pty = 1;
+        else if (!strncmp(t, "TERM=", 5)) term = t + 5;
     }
     const char *cmd = colon ? colon + 1 : "";
-    if (pty)
-        logmsg("shell: pty requested but not implemented yet, using pipes");
 
     struct channel *c = chan_alloc(name, host_id);
     if (!c) { refuse(host_id, name); return; }
 
+    struct shell_opts o;
+    memset(&o, 0, sizeof o);
+    o.cmd = cmd;
+    o.term = term;
+    /* A tty always merges stderr; asking for a pty and a separate stderr pipe
+     * at the same time is contradictory, so the pty wins. */
+    o.separate_err = v2 && !pty;
+    o.pty = pty;
+    o.rows = 0;
+    o.cols = 0;
+
     struct shell_proc p;
     shell_proc_init(&p);
-    if (shell_spawn_sh(cmd, v2, &p) != 0) {
+    if (shell_spawn_sh(&o, &p) != 0) {
         logmsg("shell: spawn failed: %s", strerror(errno));
         chan_release(c);
         refuse(host_id, name);
@@ -230,14 +282,15 @@ static void open_shell(const char *name, uint32_t host_id)
 
     c->kind = KIND_SHELL;
     c->v2 = v2;
+    c->pty = p.pty;
     c->pid = p.pid;
     c->fd_in = p.fd_in;
     c->fd_out = p.fd_out;
     c->fd_err = p.fd_err;
     c->can_send = 1;
 
-    logmsg("shell: pid=%d v2=%d err=%s cmd='%s'", (int)p.pid, v2,
-           p.fd_err >= 0 ? "separate" : "merged", cmd);
+    logmsg("shell: pid=%d v2=%d pty=%d term=%s err=%s cmd='%s'", (int)p.pid, v2,
+           p.pty, term ? term : "-", p.fd_err >= 0 ? "separate" : "merged", cmd);
     send_msg(A_OKAY, c->local, c->peer, NULL, 0);
 }
 
@@ -413,7 +466,25 @@ static int on_write(const struct amessage *m, const unsigned char *data)
                          ((uint32_t)data[off + 3] << 16) | ((uint32_t)data[off + 4] << 24);
             off += 5;
             if (off + l > m->data_length) break;
-            if (stream == SUB_STDIN && c->fd_in >= 0) append_input(c, data + off, l);
+            switch (stream) {
+            case SUB_STDIN:
+                if (c->fd_in >= 0 && !c->stdin_done) append_input(c, data + off, l);
+                break;
+            case SUB_CLOSE_STDIN:
+                close_stdin(c);
+                break;
+            case SUB_WINDOW_SIZE:
+                /* struct winsize as four little-endian uint16: rows, cols,
+                 * xpixel, ypixel.  Only the first two matter to us. */
+                if (l >= 4) {
+                    int rows = (int)((uint32_t)data[off] | ((uint32_t)data[off + 1] << 8));
+                    int cols = (int)((uint32_t)data[off + 2] | ((uint32_t)data[off + 3] << 8));
+                    chan_winsize(c, rows, cols);
+                }
+                break;
+            default:
+                break;
+            }
             off += l;
         }
         return 0;
@@ -471,19 +542,38 @@ static void check_finish(struct channel *c)
     chan_release(c);
 }
 
+/* Drop the reading side.  With a pty fd_in and fd_out are the same master, so
+ * both fields have to go at once - closing only one leaves a dangling fd that
+ * a later poll() would register and then fail on. */
+static void close_read_side(struct channel *c, int what, int fd)
+{
+    if (c->pty) {
+        c->fd_in = -1;
+        c->fd_out = -1;
+        c->inlen = 0;
+    } else if (what == EV_STDOUT) {
+        c->fd_out = -1;
+    } else {
+        c->fd_err = -1;
+    }
+    close(fd);
+}
+
 static void handle_channel_io(struct channel *c, int what)
 {
     unsigned char buf[IO_CHUNK];
 
     if (what == EV_STDIN) {
+        if (c->fd_in < 0 || c->inlen == 0) return;
         ssize_t n = write(c->fd_in, c->inbuf, c->inlen);
         if (n > 0) {
             memmove(c->inbuf, c->inbuf + n, c->inlen - (size_t)n);
             c->inlen -= (size_t)n;
-        } else if (n < 0 && errno == EPIPE) {
-            close(c->fd_in);
-            c->fd_in = -1;
+        } else if (n < 0 && (errno == EPIPE || errno == EIO)) {
+            /* Nobody is reading any more.  A pty master still has output to
+             * give us, so only the pipe case can drop the descriptor. */
             c->inlen = 0;
+            if (!c->pty) { close(c->fd_in); c->fd_in = -1; }
         }
         return;
     }
@@ -496,19 +586,17 @@ static void handle_channel_io(struct channel *c, int what)
         c->can_send = 0;               /* flow control: wait for OKAY */
         return;
     }
-    if (n == 0) {
+    /* Linux reports EIO on a pty master once the last slave is closed, which
+     * is the pty equivalent of reading EOF from a pipe. */
+    if (n == 0 || (n < 0 && errno == EIO)) {
         *eof = 1;
-        close(fd);
-        if (what == EV_STDOUT) c->fd_out = -1;
-        else c->fd_err = -1;
+        close_read_side(c, what, fd);
         logmsg("chan '%s': %s EOF", c->name, what == EV_STDOUT ? "stdout" : "stderr");
         return;
     }
     if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
         *eof = 1;
-        close(fd);
-        if (what == EV_STDOUT) c->fd_out = -1;
-        else c->fd_err = -1;
+        close_read_side(c, what, fd);
     }
 }
 
