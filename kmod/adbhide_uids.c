@@ -55,7 +55,12 @@ int adbhide_parse_targets(const char *spec)
 			continue;
 		if (kstrtou32(tok, 10, &v))
 			continue;
-		if (v < 10000 || v > 1999999)
+		/*
+		 * App uids are userId * PER_USER_RANGE + appId, with appId >= 10000.
+		 * A fixed ceiling silently dropped HyperOS app clones (userId 999,
+		 * e.g. 99910334), so validate the appId part instead of the total.
+		 */
+		if (v < 10000 || (v % 100000) < 10000)
 			continue;
 		list[n++] = v;
 	}
