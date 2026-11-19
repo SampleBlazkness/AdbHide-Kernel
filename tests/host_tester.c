@@ -18,14 +18,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 static int g_fd = -1;
 static uint32_t g_next_id = 1;
 static int g_pass, g_total;
-static char g_reason[256];
-static char g_why[256];
+static char g_reason[512];
+static char g_why[512];
 
 struct rx {
     uint32_t cmd, a0, a1, len;
@@ -379,6 +380,221 @@ fail:
     return -1;
 }
 
+/* ---------------- sync: helpers ---------------- */
+
+static unsigned char g_syn[1 << 20];
+static size_t g_synlen;
+
+struct syncres {
+    uint32_t mode, size, time;
+    char names[64][128];
+    int nnames;
+    unsigned char *data;
+    size_t datalen, datacap;
+    int done;
+    char msg[256];
+};
+
+static uint32_t get32(const unsigned char *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+           ((uint32_t)p[3] << 24);
+}
+
+static void put32(unsigned char *p, uint32_t v)
+{
+    p[0] = (unsigned char)(v & 0xff);
+    p[1] = (unsigned char)((v >> 8) & 0xff);
+    p[2] = (unsigned char)((v >> 16) & 0xff);
+    p[3] = (unsigned char)((v >> 24) & 0xff);
+}
+
+static void sync_req(struct chan *ch, uint32_t id, const char *path)
+{
+    size_t plen = strlen(path) + 1;
+    unsigned char buf[8 + 512];
+    if (plen > sizeof buf - 8) plen = sizeof buf - 8;
+    put32(buf, id);
+    put32(buf + 4, (uint32_t)plen);
+    memcpy(buf + 8, path, plen);
+    send_msg(A_WRTE, ch->my_id, ch->dev_id, buf, 8 + plen);
+}
+
+/* want: 0 = a STAT reply, 1 = a whole directory listing, 2 = DATA...DONE */
+static int sync_wait(struct chan *ch, int want, struct syncres *r, int timeout_ms)
+{
+    g_synlen = 0;
+    memset(r, 0, sizeof *r);
+    size_t off = 0;
+
+    for (;;) {
+        while (g_synlen - off >= 8) {
+            uint32_t id = get32(g_syn + off);
+            uint32_t fl = get32(g_syn + off + 4);
+            if (g_synlen - off < 8 + (size_t)fl) break;
+            const unsigned char *p = g_syn + off + 8;
+
+            if (id == 0x4c494146u) {              /* FAIL */
+                snprintf(r->msg, sizeof r->msg, "%.*s", (int)fl, (const char *)p);
+                return -1;
+            }
+            if (id == 0x41544144u) {              /* DATA */
+                if (buf_add(&r->data, &r->datalen, &r->datacap, p, fl) != 0) return -1;
+            } else if (id == 0x454e4f44u) {       /* DONE */
+                r->done = 1;
+                if (want == 2) return 0;
+            } else if (id == 0x54415453u && fl == 12) {  /* STAT */
+                r->mode = get32(p);
+                r->size = get32(p + 4);
+                r->time = get32(p + 8);
+                if (want == 0) return 0;
+            } else if (id == 0x5453494cu && fl >= 16) {   /* LIST */
+                uint32_t nl = get32(p + 12);
+                if (nl == 0) {
+                    if (want == 1) return 0;
+                } else if (r->nnames < 64 && nl < 128) {
+                    memcpy(r->names[r->nnames], p + 16, nl);
+                    r->names[r->nnames][nl] = 0;
+                    r->nnames++;
+                }
+            }
+            off += 8 + fl;
+        }
+
+        struct rx m;
+        if (recv_msg(&m, timeout_ms) <= 0) {
+            snprintf(g_why, sizeof g_why, "sync: link lost");
+            return -1;
+        }
+        if (m.cmd == A_WRTE) {
+            send_msg(A_OKAY, ch->my_id, ch->dev_id, NULL, 0);
+            if (m.len) {
+                if (g_synlen + m.len > sizeof g_syn) {
+                    free(m.data);
+                    snprintf(g_why, sizeof g_why, "sync: receive buffer overflow");
+                    return -1;
+                }
+                memcpy(g_syn + g_synlen, m.data, m.len);
+                g_synlen += m.len;
+            }
+        }
+        free(m.data);
+    }
+}
+
+static int expect_clse(struct chan *ch, int timeout_ms)
+{
+    for (;;) {
+        struct rx m;
+        if (recv_msg(&m, timeout_ms) <= 0) return -1;
+        if (m.cmd == A_CLSE) { free(m.data); return 0; }
+        if (m.cmd == A_WRTE) send_msg(A_OKAY, ch->my_id, ch->dev_id, NULL, 0);
+        free(m.data);
+    }
+}
+
+static int case_sync_stat(const char *path, size_t expect_size)
+{
+    struct chan ch;
+    struct syncres r;
+    memset(&r, 0, sizeof r);
+
+    int rc = open_service("sync:", 6, &ch);
+    CHECK(rc == 0, "open sync failed rc=%d", rc);
+
+    sync_req(&ch, 0x54415453u, path);          /* STAT */
+    CHECK(sync_wait(&ch, 0, &r, 20000) == 0, "STAT failed: %s", r.msg);
+    CHECK(r.mode != 0, "STAT mode is 0 (path not found)");
+    CHECK((r.mode & 0170000) == 0100000, "mode %o is not a regular file", r.mode);
+    CHECK(r.size == expect_size, "size %u, expected %zu", r.size, expect_size);
+    printf("[host] stat: mode=%o size=%u mtime=%u\n", r.mode, r.size, r.time);
+
+    sync_req(&ch, 0x54495551u, "");            /* QUIT */
+    CHECK(expect_clse(&ch, 20000) == 0, "channel not closed after QUIT");
+    free(r.data);
+    return 0;
+fail:
+    free(r.data);
+    return -1;
+}
+
+static int case_sync_list(const char *dir, const char *n1, const char *n2)
+{
+    struct chan ch;
+    struct syncres r;
+    memset(&r, 0, sizeof r);
+
+    int rc = open_service("sync:", 6, &ch);
+    CHECK(rc == 0, "open sync failed rc=%d", rc);
+
+    sync_req(&ch, 0x5453494cu, dir);           /* LIST */
+    CHECK(sync_wait(&ch, 1, &r, 20000) == 0, "LIST failed: %s", r.msg);
+
+    int found1 = 0, found2 = 0;
+    for (int i = 0; i < r.nnames; i++) {
+        if (!strcmp(r.names[i], n1)) found1 = 1;
+        if (!strcmp(r.names[i], n2)) found2 = 1;
+    }
+    CHECK(found1 && found2, "listing missing an entry (got %d names)", r.nnames);
+    printf("[host] list: %d entries\n", r.nnames);
+
+    sync_req(&ch, 0x54495551u, "");
+    CHECK(expect_clse(&ch, 20000) == 0, "channel not closed after QUIT");
+    free(r.data);
+    return 0;
+fail:
+    free(r.data);
+    return -1;
+}
+
+static int case_sync_recv(const char *path, const unsigned char *expect, size_t n)
+{
+    struct chan ch;
+    struct syncres r;
+    memset(&r, 0, sizeof r);
+
+    int rc = open_service("sync:", 6, &ch);
+    CHECK(rc == 0, "open sync failed rc=%d", rc);
+
+    sync_req(&ch, 0x56434552u, path);          /* RECV */
+    CHECK(sync_wait(&ch, 2, &r, 40000) == 0, "RECV failed: %s", r.msg);
+    CHECK(r.done, "no DONE frame");
+    CHECK(r.datalen == n, "received %zu bytes, expected %zu", r.datalen, n);
+    CHECK(memcmp(r.data, expect, n) == 0, "content mismatch");
+    printf("[host] recv: %zu bytes, verified\n", r.datalen);
+
+    sync_req(&ch, 0x54495551u, "");
+    CHECK(expect_clse(&ch, 20000) == 0, "channel not closed after QUIT");
+    free(r.data);
+    return 0;
+fail:
+    free(r.data);
+    return -1;
+}
+
+static int case_sync_send(const char *path)
+{
+    struct chan ch;
+    struct syncres r;
+    memset(&r, 0, sizeof r);
+
+    int rc = open_service("sync:", 6, &ch);
+    CHECK(rc == 0, "open sync failed rc=%d", rc);
+
+    sync_req(&ch, 0x444e4553u, path);          /* SEND must be refused */
+    CHECK(sync_wait(&ch, 2, &r, 20000) != 0, "SEND was not refused");
+    CHECK(strstr(r.msg, "read-only") != NULL, "unexpected FAIL message: %s", r.msg);
+    printf("[host] send refused: %s\n", r.msg);
+
+    free(r.data);
+    send_msg(A_CLSE, ch.my_id, ch.dev_id, NULL, 0);
+    expect_clse(&ch, 20000);
+    return 0;
+fail:
+    free(r.data);
+    return -1;
+}
+
 static void report(const char *name, int ok)
 {
     g_total++;
@@ -480,6 +696,41 @@ int main(int argc, char **argv)
         report("exec: NUL-separated argv", case_exec() == 0);
         report("shell: command not found -> 127", case_not_found() == 0);
         report("refused service -> CLSE", case_refused() == 0);
+
+        /* ---- sync: (read direction) ---- */
+        const char *td = getenv("ADBNG_TEST_DIR");
+        if (!td || !*td) td = "/tmp";
+        size_t fsize = 200000;
+        unsigned char *expect = malloc(fsize);
+        if (!expect) { printf("[host] out of memory\n"); goto done; }
+        for (size_t i = 0; i < fsize; i++) expect[i] = (unsigned char)((i * 7 + 3) & 0xff);
+
+        char fpath[512], dpath[512], p1[600], p2[600];
+        snprintf(fpath, sizeof fpath, "%s/adbng-sync-%d.bin", td, (int)getpid());
+        snprintf(dpath, sizeof dpath, "%s/adbng-sync-%d.dir", td, (int)getpid());
+        snprintf(p1, sizeof p1, "%s/alpha.txt", dpath);
+        snprintf(p2, sizeof p2, "%s/beta.txt", dpath);
+
+        FILE *f = fopen(fpath, "wb");
+        if (!f) { printf("[host] cannot create %s\n", fpath); free(expect); goto done; }
+        fwrite(expect, 1, fsize, f);
+        fclose(f);
+        mkdir(dpath, 0700);
+        f = fopen(p1, "wb");
+        if (f) { fputs("alpha", f); fclose(f); }
+        f = fopen(p2, "wb");
+        if (f) { fputs("beta", f); fclose(f); }
+
+        report("sync: STAT", case_sync_stat(fpath, fsize) == 0);
+        report("sync: LIST", case_sync_list(dpath, "alpha.txt", "beta.txt") == 0);
+        report("sync: RECV 200 KB", case_sync_recv(fpath, expect, fsize) == 0);
+        report("sync: SEND refused (read-only)", case_sync_send(fpath) == 0);
+
+        unlink(p1);
+        unlink(p2);
+        rmdir(dpath);
+        unlink(fpath);
+        free(expect);
     }
 
     printf("[host] RESULT: %d/%d passed\n", g_pass, g_total);

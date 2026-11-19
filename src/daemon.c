@@ -11,6 +11,7 @@
 #include "keys.h"
 #include "proto.h"
 #include "shell.h"
+#include "sync.h"
 #include "util.h"
 
 #include <errno.h>
@@ -37,7 +38,9 @@
 #define EV_STDERR 2
 #define EV_STDIN  3
 
-enum { KIND_NONE = 0, KIND_SHELL = 1 };
+#define SYNC_CHUNK (32u * 1024u)
+
+enum { KIND_NONE = 0, KIND_SHELL = 1, KIND_SYNC = 2 };
 
 struct channel {
     int used;
@@ -58,6 +61,7 @@ struct channel {
     int eof_err;
     int exit_code;
     int exit_sent;
+    struct sync_state *sync;       /* KIND_SYNC */
 };
 
 static int g_fd = -1;
@@ -164,6 +168,7 @@ static void chan_release(struct channel *c)
                             .fd_out = c->fd_out, .fd_err = c->fd_err };
     shell_kill(&p);
     free(c->inbuf);
+    if (c->sync) sync_free(c->sync);
     memset(c, 0, sizeof *c);
 }
 
@@ -292,6 +297,19 @@ static void open_exec(const char *name, size_t name_len, uint32_t host_id)
     send_msg(A_OKAY, c->local, c->peer, NULL, 0);
 }
 
+static void open_sync(const char *name, uint32_t host_id)
+{
+    struct channel *c = chan_alloc(name, host_id);
+    if (!c) { refuse(host_id, name); return; }
+    c->sync = sync_new();
+    if (!c->sync) { chan_release(c); refuse(host_id, name); return; }
+    c->kind = KIND_SYNC;
+    c->v2 = 0;
+    c->can_send = 1;
+    logmsg("sync: channel opened");
+    send_msg(A_OKAY, c->local, c->peer, NULL, 0);
+}
+
 static void open_service(const char *name, size_t name_len, uint32_t host_id)
 {
     if (!strncmp(name, "shell:", 6) || !strncmp(name, "shell,", 6)) {
@@ -300,6 +318,10 @@ static void open_service(const char *name, size_t name_len, uint32_t host_id)
     }
     if (!strncmp(name, "exec:", 5)) {
         open_exec(name, name_len, host_id);
+        return;
+    }
+    if (!strncmp(name, "sync:", 5)) {
+        open_sync(name, host_id);
         return;
     }
     refuse(host_id, name);
@@ -376,6 +398,11 @@ static int on_write(const struct amessage *m, const unsigned char *data)
     send_msg(A_OKAY, c->local, c->peer, NULL, 0);
 
     if (m->data_length == 0) return 0;
+
+    if (c->kind == KIND_SYNC) {
+        if (c->sync) sync_feed(c->sync, data, m->data_length);
+        return 0;
+    }
 
     if (c->v2) {
         /* Host stdin arrives as sub-payloads too; only stdin matters here. */
@@ -634,8 +661,27 @@ int main(int argc, char **argv)
             handle_channel_io(map[i].c, map[i].what);
         }
 
-        for (int i = 0; i < MAX_CHANNELS; i++)
-            if (g_chan[i].used) check_finish(&g_chan[i]);
+        for (int i = 0; i < MAX_CHANNELS; i++) {
+            struct channel *c = &g_chan[i];
+            if (!c->used) continue;
+            if (c->kind != KIND_SYNC) {
+                check_finish(c);
+                continue;
+            }
+
+            sync_pump(c->sync);
+            if (c->can_send && sync_pending(c->sync) > 0) {
+                static unsigned char buf[SYNC_CHUNK];
+                size_t n = sync_take(c->sync, buf, sizeof buf);
+                send_msg(A_WRTE, c->local, c->peer, buf, n);
+                c->can_send = 0;
+            }
+            if (c->can_send && sync_finished(c->sync)) {
+                logmsg("sync: closing channel");
+                send_msg(A_CLSE, c->local, c->peer, NULL, 0);
+                chan_release(c);
+            }
+        }
     }
 
     for (int i = 0; i < MAX_CHANNELS; i++)

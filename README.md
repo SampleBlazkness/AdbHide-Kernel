@@ -2,8 +2,8 @@
 
 自写用户态 ADB **设备端**实现。目标：PC 上用原厂 `adb` 直接连上本机，不经过系统 `adbd`。
 
-> 状态：M2（协议核心）+ M3 前半（shell / exec）完成，真机 8/8 回归通过。
-> `sync:` 与 pty 未做。**当前不是可发布形态。**
+> 状态：M2（协议核心）+ M3（shell / exec / sync 读方向）完成，真机 12/12 回归通过。
+> 写方向（push）与 pty 未做。**当前不是可发布形态。**
 
 ## 已实现（真的）
 
@@ -16,14 +16,17 @@
 - `shell:` v1（stdout/stderr 合并，无退出码）
 - `shell,v2,raw:` 子包格式（stdout/stderr 分流 + 退出码）
 - `exec:`（NUL 分隔 argv，不过 shell，参数原样透传）
+- `sync:` v1 **只读**：`STAT` / `LIST` / `RECV`，`DATA`…`DONE` 分帧，`QUIT` 收尾
 - 未识别服务 → `CLSE` 拒绝
 
 ## 未实现（别当真）
 
 - banner 里的机型属性取自 `ADBNG_PRODUCT_*` 环境变量，**不是**读 Android 属性服务
 - 新 host 只记录指纹后断开，**没有**本机确认流程
-- `sync:`（推/拉文件）、`forward:`、`reboot:` 仍走拒绝分支
+- **`sync:` 的 SEND（push）明确拒绝**：那是 root 级写文件能力，等 M5 的授权层就位再做
+- `sync_v2`（`STA2`/`LIS2`/`SND2`）未做，banner 也**没有**宣告 `sendrecv_v2`，老客户端会退回 v1
 - pty 未实现：请求 `pty` 时降级为管道，交互式 `adb shell` 的体验会不一样
+- `forward:` / `reboot:` / `root:` 仍走拒绝分支
 - **仅 socketpair transport，没有 FunctionFS** → PC 现在还连不上
 - 本机构建是 glibc 静态链接，非发布形态；发布走 CI 的 NDK / bionic
 
@@ -38,10 +41,13 @@ make test     # host_tester 驱动 usbgwd 跑全部回归
 make test-bad # 只跑"签名错误应被拒绝"
 ```
 
+回归需要可写目录，默认 `/tmp`；在 Android 上跑时用
+`ADBNG_TEST_DIR=/data/local/tmp ./host_tester ...`。
+
 ## 测试
 
 `tests/host_tester.c` 是手写的 host 端，用 `socketpair` 驱动 `usbgwd`，不依赖 USB。
-当前 8 项回归：
+当前 12 项回归：
 
 ```
 [host] PASS handshake + auth
@@ -52,7 +58,11 @@ make test-bad # 只跑"签名错误应被拒绝"
 [host] PASS exec: NUL-separated argv
 [host] PASS shell: command not found -> 127
 [host] PASS refused service -> CLSE
-[host] RESULT: 8/8 passed
+[host] PASS sync: STAT
+[host] PASS sync: LIST
+[host] PASS sync: RECV 200 KB
+[host] PASS sync: SEND refused (read-only)
+[host] RESULT: 12/12 passed
 ```
 
 `bn_test` 与 python `pow()` 逐字节比对；`sig_tool` 做签/验往返。
