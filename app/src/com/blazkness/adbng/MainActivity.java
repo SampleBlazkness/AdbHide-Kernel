@@ -1,5 +1,8 @@
 package com.blazkness.adbng;
 
+// the merged app uses com.blazkness.adbhide as its package, so R lives there
+import com.blazkness.adbhide.R;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.graphics.Color;
@@ -9,6 +12,7 @@ import android.os.Looper;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CompoundButton;
+import android.widget.LinearLayout;
 import android.widget.Switch;
 import android.widget.TextView;
 
@@ -54,6 +58,8 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         setContentView(R.layout.activity_main);
+        ((LinearLayout) findViewById(R.id.tabHost))
+                .addView(com.blazkness.adbhide.Tabs.bar(this, false));
 
         sw = findViewById(R.id.sw);
         tvSub = findViewById(R.id.tvSub);
@@ -181,7 +187,7 @@ public class MainActivity extends Activity {
             tvStatus.setText("系统 adb：" + adbd
                     + "\nadbng：" + adbng
                     + "\nUSB：" + link + "（" + (udc == null || udc.isEmpty() ? "未知" : udc) + "）"
-                    + "\n已配对密钥：" + st.get("keys") + " 条"
+                    + "\n已配对密钥：" + (st.get("keys") == null ? "-" : st.get("keys")) + " 条"
                     + "\n开关记忆：" + ("1".equals(st.get("enabled")) ? "开机自动启动" : "关闭"));
         }
 

@@ -38,6 +38,9 @@ mkdir -p "$OUT/gen" "$OUT/classes" "$OUT/dex" "$APP/assets"
 cp -f "$ROOT/build/usbgwd" "$APP/assets/usbgwd"
 cp -f "$ROOT/tools/adbngctl.sh" "$APP/assets/adbngctl.sh"
 cp -f "$ROOT/tools/usb-gadget.sh" "$APP/assets/usb-gadget.sh"
+if [ -f "$APP/xposed_init" ]; then
+    cp -f "$APP/xposed_init" "$APP/assets/xposed_init"
+fi
 chmod 644 "$APP/assets"/*
 
 echo "== aapt2 compile"
@@ -50,20 +53,34 @@ $AAPT2 link -o "$OUT/base.apk" \
     -R "$OUT/res.zip" \
     -A "$APP/assets" \
     --java "$OUT/gen" \
-    --min-sdk-version 24 \
+    --min-sdk-version 26 \
     --target-sdk-version 36 \
     --auto-add-overlay
+
+echo "== javac (xposed stubs)"
+# compileOnly: LSPosed provides the real classes at runtime, so these must not
+# end up in classes.dex.
+CP="$PLATFORM"
+if [ -d "$APP/src_stubs" ]; then
+    mkdir -p "$OUT/stubs"
+    # shellcheck disable=SC2046
+    javac -nowarn -source 8 -target 8 \
+        -bootclasspath "$PLATFORM" -classpath "$PLATFORM" \
+        -d "$OUT/stubs" \
+        $(find "$APP/src_stubs" -name '*.java')
+    CP="$PLATFORM:$OUT/stubs"
+fi
 
 echo "== javac"
 # shellcheck disable=SC2046
 javac -nowarn -source 8 -target 8 \
-    -bootclasspath "$PLATFORM" -classpath "$PLATFORM" \
+    -bootclasspath "$PLATFORM" -classpath "$CP" \
     -d "$OUT/classes" \
     $(find "$APP/src" "$OUT/gen" -name '*.java')
 
 echo "== d8"
 # shellcheck disable=SC2046
-"$BT/d8" --lib "$PLATFORM" --min-api 24 --output "$OUT/dex" \
+"$BT/d8" --lib "$PLATFORM" --min-api 26 --output "$OUT/dex" \
     $(find "$OUT/classes" -name '*.class')
 
 echo "== package"

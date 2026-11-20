@@ -1,25 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.blazkness.adbng"
-    android:versionCode="1"
-    android:versionName="0.1">
+    package="com.blazkness.adbhide"
+    android:versionCode="58"
+    android:versionName="2.0.0">
 
-    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="36" />
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="36" />
+
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
-        android:label="adbng"
-        android:icon="@android:drawable/sym_def_app_icon"
-        android:theme="@android:style/Theme.DeviceDefault.DayNight"
-        android:allowBackup="false">
+        android:allowBackup="false"
+        android:icon="@drawable/ic_launcher"
+        android:theme="@style/AppTheme"
+        android:label="AdbHide">
 
+        <!-- 隐藏名单（原 AdbHide 界面），也是 Xposed 模块的宿主 -->
         <activity
-            android:name=".MainActivity"
+            android:name="com.blazkness.adbhide.MainActivity"
             android:exported="true"
             android:screenOrientation="portrait"
-            android:label="adbng">
+            android:label="AdbHide">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- adbng 面板，由上面的 tab 条启动 -->
+        <activity
+            android:name="com.blazkness.adbng.MainActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:label="adbng" />
+
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="Hide ADB state" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="93" />
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposed_scope" />
     </application>
 </manifest>
