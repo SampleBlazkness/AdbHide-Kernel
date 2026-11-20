@@ -1016,6 +1016,14 @@ int main(int argc, char **argv)
     int bad = (argc > 4 && !strcmp(argv[4], "bad"));
     int pending_mode = (argc > 4 && !strcmp(argv[4], "pending"));
 
+    {
+        /* the cases write scratch files under ADBNG_TEST_DIR; create it so a
+         * clean checkout works (it used to rely on the directory existing). */
+        const char *td0 = getenv("ADBNG_TEST_DIR");
+        if (td0 && *td0)
+            mkdir_p(td0);
+    }
+
     uint32_t n[RSA_LIMBS], d[RSA_LIMBS];
     if (load_hostkey(argv[3], n, d) != 0) {
         fprintf(stderr, "cannot read host key %s\n", argv[3]);
