@@ -1,0 +1,65 @@
+#!/bin/sh
+# pre-push: 挡住“邮箱写错”的提交，防止历史里再长出幽灵贡献者。
+#
+# 默认规则：拒绝 author / committer 是自己的 GitHub noreply 形式
+#           sampleblazkness@users.noreply.github.com
+#           blazkness@users.noreply.github.com
+# 严格模式：git config hooks.strictEmail true
+#           -> 只允许 hooks.allowedEmails（默认 SampleBlazkness@outlook.com）
+#           适用于没有上游作者的仓库（如 AdbHide-Kernel）。
+#
+# 安装：
+#   cp .githooks/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push
+#   或者  git config core.hooksPath .githooks
+
+ALLOWED='SampleBlazkness@outlook.com'
+ZERO='0000000000000000000000000000000000000000'
+strict=$(git config --get hooks.strictEmail 2>/dev/null)
+fail=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    [ "$local_sha" = "$ZERO" ] && continue
+
+    if [ "$remote_sha" = "$ZERO" ]; then
+        commits=$(git rev-list "$local_sha" 2>/dev/null)
+    else
+        commits=$(git rev-list "$remote_sha..$local_sha" 2>/dev/null)
+    fi
+    [ -z "$commits" ] && continue
+
+    for c in $commits; do
+        ident=$(git log -1 --format='%ae|%ce|%s' "$c" 2>/dev/null)
+        ae=$(printf '%s' "$ident" | cut -d'|' -f1)
+        ce=$(printf '%s' "$ident" | cut -d'|' -f2)
+        subj=$(printf '%s' "$ident" | cut -d'|' -f3-)
+
+        for e in "$ae" "$ce"; do
+            le=$(printf '%s' "$e" | tr 'A-Z' 'a-z')
+            bad=0
+            case "$le" in
+                sampleblazkness@users.noreply.github.com|blazkness@users.noreply.github.com)
+                    bad=1 ;;
+                *)
+                    if [ "$strict" = "true" ] && [ "$le" != "sampleblazkness@outlook.com" ]; then
+                        bad=1
+                    fi
+                    ;;
+            esac
+            if [ "$bad" = "1" ]; then
+                echo "pre-push: 拒绝 -> $(printf '%s' "$c" | cut -c1-8) author=$ae committer=$ce  $subj" >&2
+                fail=1
+            fi
+        done
+    done
+done
+
+if [ "$fail" = "1" ]; then
+    echo "" >&2
+    echo "pre-push: 推送已中止。你的提交必须用 $ALLOWED" >&2
+    echo "  git config user.email '$ALLOWED'" >&2
+    echo "  git commit --amend --reset-author                                      # 只改最近一条" >&2
+    echo "  git rebase --exec 'git commit --amend --reset-author --no-edit' <base> # 批量改" >&2
+    exit 1
+fi
+
+exit 0
