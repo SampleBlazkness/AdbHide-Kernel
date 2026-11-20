@@ -252,7 +252,9 @@ cmd_status() {
     if [ -n "$l" ]; then echo "adbng_link=present"; else echo "adbng_link=absent"; fi
     echo "udc=${UDC:-none}"
     echo "udc_state=$(cat "/sys/class/udc/$UDC/state" 2>/dev/null)"
-    echo "keys=$(grep -c . "$KEYS" 2>/dev/null || echo 0)"
+    k=$(grep -c . "$KEYS" 2>/dev/null)
+    [ -n "$k" ] || k=0
+    echo "keys=$k"
     echo "pending=$(ls "$PDIR" 2>/dev/null | grep '\.req$' | sed 's/\.req$//' | head -n 1)"
     echo "takeover_fails=$(cat "$TAKEOVER_FAILS" 2>/dev/null || echo 0)"
     return 0
