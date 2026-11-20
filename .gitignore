@@ -12,3 +12,7 @@ hostkey.pub
 # APK 构建产物（build-app.sh 会把 tools/ 和 build/ 的东西拷进来）
 app/assets/
 app/gen/
+
+# 本地改造前的备份
+*.bak-banner
+*.bak-banner/

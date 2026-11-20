@@ -1,5 +1,7 @@
 package com.blazkness.adbhide;
 
+import com.blazkness.adbng.R;
+
 import android.app.Activity;
 import android.graphics.Typeface;
 import android.os.Build;
@@ -32,6 +34,12 @@ import java.util.Map;
 public class MainActivity extends Activity {
 
     private static final String SCRIPT = "echo SU=1\np=/proc/adbhide_kmod\n" +
+            // LSPosed / Vector：只看模块目录在不在，作用域是否生效由 hookAlive() 判定
+            "lsp=0\n" +
+            "for d in zygisk_lsposed lsposed riru_lsposed zygisk_vector; do\n" +
+            "  [ -d /data/adb/modules/$d ] && lsp=1\n" +
+            "done\n" +
+            "echo LSPINST=$lsp\n" +
             "echo KMOD=$([ -r $p ] && echo 1 || echo 0)\n" +
             "echo KMODINST=$([ -d /data/adb/modules/adbhide_kmod ] && echo 1 || echo 0)\n" +
             "echo KMODDIS=$([ -f /data/adb/modules/adbhide_kmod/disable ] && echo 1 || echo 0)\n" +
@@ -67,6 +75,14 @@ public class MainActivity extends Activity {
 
     private static final String PROPS = "/data/system/adbhide.props";
 
+    // 横幅只有三档：缺东西=红，装了没生效=黄，装了没启用=绿
+    private static final int BAN_FG_RED = 0xFFB91C1C;
+    private static final int BAN_BG_RED = 0xFFFEE2E2;
+    private static final int BAN_FG_AMBER = 0xFF92400E;
+    private static final int BAN_BG_AMBER = 0xFFFEF3C7;
+    private static final int BAN_FG_GREEN = 0xFF166534;
+    private static final int BAN_BG_GREEN = 0xFFDCFCE7;
+
     private LinearLayout body;
     private TextView hint;
     private TextView tvSysState;
@@ -75,15 +91,22 @@ public class MainActivity extends Activity {
     private String updateText = "";
     private String updateDetail = "";
     private LinearLayout bannerBox;
+    private android.app.Dialog suGate;
 
     private final java.util.Map<String, String> pending = new java.util.HashMap<String, String>();
     private long pendingUntil = 0L;
+    private long suRetryAt = 0L;
     private volatile boolean masterOn = true;
 
     private final Handler ticker = new Handler(Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
+            // 授权框被系统挡在后面时用户看不到提示，这里自己每秒看一眼，2.5s 重试一次
+            if (suGate != null && System.currentTimeMillis() >= suRetryAt) {
+                suRetryAt = System.currentTimeMillis() + 2500L;
+                refresh();
+            }
             updateLive();
             ticker.postDelayed(this, 1000);
         }
@@ -631,6 +654,7 @@ public class MainActivity extends Activity {
     }
 
     private void render(State st) {
+        updateSuGate(st.suOk);
         binding = true;
         setSwitch(swMaster, !"0".equals(props.get("master")));
         setSwitch(swDev, !"0".equals(props.get("dev")));
@@ -691,28 +715,23 @@ public class MainActivity extends Activity {
         if (bannerBox != null) {
             bannerBox.removeAllViews();
             if (!st.suOk) {
-                addBanner(getString(R.string.banner_su),
-                        0xFFB91C1C, 0xFFFEE2E2);
+                addBanner(getString(R.string.banner_su), BAN_FG_RED, BAN_BG_RED);
             } else {
+                // 顺序固定：LSPosed -> 内核层 -> Native 层，每层最多一条
+                if (!st.lspInst) {
+                    addBanner(getString(R.string.banner_lsp_missing), BAN_FG_RED, BAN_BG_RED);
+                } else if (!st.lspOk) {
+                    addBanner(getString(R.string.banner_lsp_scope), BAN_FG_AMBER, BAN_BG_AMBER);
+                }
                 if (!st.kmodInst) {
-                    addBanner(getString(R.string.banner_kmod_missing),
-                            0xFFB91C1C, 0xFFFEE2E2);
+                    addBanner(getString(R.string.banner_kmod_missing), BAN_FG_RED, BAN_BG_RED);
                 } else if (st.kmodDis) {
-                    addBanner(getString(R.string.banner_kmod_disabled),
-                            0xFF92400E, 0xFFFEF3C7);
-                } else if (!st.kmodOk) {
-                    addBanner(getString(R.string.banner_kmod),
-                            0xFFB91C1C, 0xFFFEE2E2);
+                    addBanner(getString(R.string.banner_kmod_disabled), BAN_FG_GREEN, BAN_BG_GREEN);
                 }
                 if (!st.nativeInst) {
-                    addBanner(getString(R.string.banner_zygisk_missing),
-                            0xFFB91C1C, 0xFFFEE2E2);
+                    addBanner(getString(R.string.banner_zygisk_missing), BAN_FG_RED, BAN_BG_RED);
                 } else if (st.nativeDis) {
-                    addBanner(getString(R.string.banner_zygisk_disabled),
-                            0xFF92400E, 0xFFFEF3C7);
-                } else if (!st.nativeOk) {
-                    addBanner(getString(R.string.banner_zygisk),
-                            0xFFB91C1C, 0xFFFEE2E2);
+                    addBanner(getString(R.string.banner_zygisk_disabled), BAN_FG_GREEN, BAN_BG_GREEN);
                 }
             }
             bannerBox.setVisibility(bannerBox.getChildCount() == 0
@@ -724,21 +743,78 @@ public class MainActivity extends Activity {
         tvApp.setText("v" + st.appVer + " · " + getString(R.string.mod_installed));
         tvApp.setTextColor(Ui.OK);
 
-        StringBuilder hintText = new StringBuilder();
-        if (!st.kmodInst) {
-            hintText.append(getString(R.string.hint_no_kmod));
-        } else if (st.kmodDis) {
-            hintText.append(getString(R.string.hint_kmod_disabled));
-        } else if (!st.kmodOk && st.error != null) {
-            hintText.append(getString(R.string.hint_no_state, String.valueOf(st.error)));
-        } else if (!st.kmodOk) {
-            hintText.append(getString(R.string.hint_no_kmod));
+        // 底部不再放状态诊断：状态全部由顶部横幅表达，这里只保留 syncList() 的短暂反馈
+        hint.setText("");
+    }
+
+    /**
+     * 没有 root 时下面所有探测都是假的（未安装 / 未启用全是误报），
+     * 所以先挡住界面，逼用户去 KernelSU / Magisk 授权。
+     * 授权提示框可能被系统挡在后面，所以每 2.5 秒自己重试一次。
+     */
+    private void updateSuGate(boolean suOk) {
+        if (!suOk) {
+            if (suGate != null) {
+                return;
+            }
+            final android.app.Dialog d = new android.app.Dialog(this);
+            d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+            LinearLayout outer = new LinearLayout(this);
+            outer.setOrientation(LinearLayout.VERTICAL);
+            int pad = dp(18);
+            outer.setPadding(pad, pad, pad, pad);
+            LinearLayout card = Ui.card(this);
+            card.setPadding(dp(20), dp(18), dp(20), dp(16));
+            card.addView(Ui.title(this, getString(R.string.su_gate_title)));
+            TextView msg = Ui.text(this, getString(R.string.su_gate_msg), 12.5f, Ui.MUTED);
+            msg.setPadding(0, dp(10), 0, dp(18));
+            msg.setLineSpacing(dp(4), 1f);
+            card.addView(msg);
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            TextView exit = Ui.action(this, getString(R.string.su_gate_exit), false);
+            TextView retry = Ui.action(this, getString(R.string.su_gate_retry), true);
+            LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+            left.rightMargin = dp(10);
+            row.addView(exit, left);
+            row.addView(retry, new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            card.addView(row);
+            outer.addView(card);
+            exit.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    finish();
+                }
+            });
+            retry.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    suGate = null;
+                    d.dismiss();
+                    refresh();
+                }
+            });
+            d.setContentView(outer);
+            d.setCancelable(false);
+            d.setCanceledOnTouchOutside(false);
+            d.show();
+            android.view.Window w = d.getWindow();
+            if (w != null) {
+                w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0));
+                w.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+                android.view.WindowManager.LayoutParams lp = w.getAttributes();
+                lp.dimAmount = 0.45f;
+                w.setAttributes(lp);
+                w.setLayout(LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+            }
+            suGate = d;
+        } else if (suGate != null) {
+            suGate.dismiss();
+            suGate = null;
         }
-        if (st.nativeInst && st.nativeDis) {
-              if (hintText.length() > 0) hintText.append("\n");
-            hintText.append(getString(R.string.hint_native_disabled));
-        }
-        hint.setText(hintText.toString());
     }
 
     /** Configured entry that is not in the kernel list: no per-row status, no delete. */
@@ -1013,6 +1089,8 @@ public class MainActivity extends Activity {
         }
 
         st.suOk = "1".equals(v.get("SU"));
+        st.lspInst = "1".equals(v.get("LSPINST"));
+        st.lspOk = st.lspInst && hookAlive();
         st.kmodOk = "1".equals(v.get("KMOD"));
         st.kmodInst = "1".equals(v.get("KMODINST"));
         st.kmodDis = "1".equals(v.get("KMODDIS"));
@@ -1107,6 +1185,8 @@ public class MainActivity extends Activity {
 
     private static final class State {
         boolean suOk;
+        boolean lspInst;
+        boolean lspOk;
         boolean kmodOk;
         boolean kmodInst;
         boolean kmodDis;

@@ -21,8 +21,6 @@
     <string name="loading">读取中…</string>
     <string name="syncing">正在同步…</string>
     <string name="read_failed">读取失败</string>
-    <string name="hint_no_state">读不到模块状态：%1$s</string>
-    <string name="hint_no_kmod">内核模块未启用：在 KernelSU 里装好 adbhide_kmod 后重启</string>
     <string name="title_wireless">无线调试</string>
     <string name="wireless_desc">自动发现已关闭（隐藏需要），手动连接仍然可用</string>
     <string name="wireless_cmd">adb pair IP:端口 配对码\nadb connect IP:端口</string>
@@ -40,8 +38,12 @@
     <string name="update_detail_title">可更新的组件</string>
     <string name="ok">知道了</string>
     <string name="banner_su">su 不可用，请先在 KernelSU 中授权 AdbHide</string>
-    <string name="banner_kmod">内核模块未加载，部分隐藏不会生效</string>
-    <string name="banner_zygisk">Zygisk 模块未加载，部分隐藏不会生效</string>
+    <string name="banner_lsp_missing">LSPosed 未安装，隐藏名单无法生效</string>
+    <string name="banner_lsp_scope">LSPosed 已安装但本模块未生效：在 LSPosed 中启用 AdbHide 并勾选作用域后重启</string>
+    <string name="su_gate_title">需要 root 授权</string>
+    <string name="su_gate_msg">模块状态的检测依赖 su。未授权时所有探测结果都是错的（会把已安装读成未安装），所以在授权前不显示任何状态。\n\n请在弹出的 KernelSU / Magisk 提示里点“允许”，然后点“重新检测”。</string>
+    <string name="su_gate_retry">重新检测</string>
+    <string name="su_gate_exit">退出</string>
     <string name="picker_title">选择要隐藏的应用</string>
     <string name="picker_show_system">显示系统应用</string>
     <string name="save_sync">保存并同步</string>
@@ -52,14 +54,12 @@
     <string name="mod_enabled">已启用</string>
     <string name="mod_installed">已安装</string>
     <string name="mod_enabled_not_loaded">已启用，未加载</string>
-    <string name="banner_kmod_disabled">内核模块已禁用，内核层隐藏关闭</string>
-    <string name="banner_zygisk_disabled">Native 模块已禁用，Zygisk 层隐藏关闭</string>
-    <string name="hint_kmod_disabled">内核模块已禁用：在内核模块管理器里启用后重启</string>
+    <string name="banner_kmod_disabled">内核模块已安装但未启用：在 KernelSU 中启用后重启</string>
+    <string name="banner_zygisk_disabled">Native 模块已安装但未启用：在 KernelSU 中启用后重启</string>
     <string name="list_empty_inactive">名单为空 · LSPosed 层未生效，内核名单已清空</string>
     <string name="banner_kmod_missing">内核模块未安装，内核层隐藏不可用</string>
     <string name="banner_zygisk_missing">Native 模块未安装，Zygisk 层隐藏不可用</string>
     <string name="pkg_inactive">已配置，未写入内核（LSPosed 层未生效）</string>
     <string name="pkg_inactive_kernel">已配置，内核层未运行，未写入内核</string>
     <string name="pkg_inactive_lsposed">已配置，LSPosed 层未生效，内核名单已清空</string>
-    <string name="hint_native_disabled">Native 模块已禁用：在内核模块管理器里启用后重启</string>
 </resources>

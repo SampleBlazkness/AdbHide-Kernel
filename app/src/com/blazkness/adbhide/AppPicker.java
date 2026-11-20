@@ -1,5 +1,7 @@
 package com.blazkness.adbhide;
 
+import com.blazkness.adbng.R;
+
 import android.app.Activity;
 import android.app.Dialog;
 import android.content.pm.ApplicationInfo;

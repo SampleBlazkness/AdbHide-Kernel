@@ -1,7 +1,7 @@
 package com.blazkness.adbng;
 
-// the merged app uses com.blazkness.adbhide as its package, so R lives there
-import com.blazkness.adbhide.R;
+// the merged app uses com.blazkness.adbng as its package, so R lives there
+import com.blazkness.adbng.R;
 
 import android.app.Activity;
 import android.app.AlertDialog;

@@ -21,8 +21,6 @@
     <string name="loading">Loading…</string>
     <string name="syncing">Syncing…</string>
     <string name="read_failed">Read failed</string>
-    <string name="hint_no_state">Cannot read module state: %1$s</string>
-    <string name="hint_no_kmod">Kernel module not loaded: install adbhide_kmod in KernelSU, then reboot</string>
     <string name="title_wireless">Wireless debugging</string>
     <string name="wireless_desc">Auto-discovery is off (required for hiding); manual connect still works</string>
     <string name="wireless_cmd">adb pair IP:PORT CODE\nadb connect IP:PORT</string>
@@ -40,8 +38,12 @@
     <string name="update_detail_title">Available updates</string>
     <string name="ok">OK</string>
     <string name="banner_su">su unavailable, grant root to AdbHide in KernelSU</string>
-    <string name="banner_kmod">Kernel module not loaded, some hiding is off</string>
-    <string name="banner_zygisk">Zygisk module not loaded, some hiding is off</string>
+    <string name="banner_lsp_missing">LSPosed is not installed; the hide list cannot work</string>
+    <string name="banner_lsp_scope">LSPosed is installed but this module is inactive: enable AdbHide in LSPosed and tick its scope, then reboot</string>
+    <string name="su_gate_title">Root permission required</string>
+    <string name="su_gate_msg">Every probe depends on su. Without it the results are wrong (installed modules read as missing), so no state is shown until you grant it.\n\nTap “Allow” in the KernelSU / Magisk prompt, then tap Retry.</string>
+    <string name="su_gate_retry">Retry</string>
+    <string name="su_gate_exit">Exit</string>
     <string name="picker_title">Select apps to hide</string>
     <string name="picker_show_system">Show system apps</string>
     <string name="save_sync">Save and sync</string>
@@ -52,14 +54,12 @@
     <string name="mod_enabled">Enabled</string>
     <string name="mod_installed">Installed</string>
     <string name="mod_enabled_not_loaded">Enabled, not loaded</string>
-    <string name="banner_kmod_disabled">Kernel module is disabled; kernel-layer hiding is off</string>
-    <string name="banner_zygisk_disabled">Native module is disabled; Zygisk-layer hiding is off</string>
-    <string name="hint_kmod_disabled">Kernel module is disabled: enable it in the root manager, then reboot</string>
+    <string name="banner_kmod_disabled">Kernel module is installed but not enabled: enable it in KernelSU, then reboot</string>
+    <string name="banner_zygisk_disabled">Native module is installed but not enabled: enable it in KernelSU, then reboot</string>
     <string name="list_empty_inactive">List empty: the LSPosed layer is inactive, kernel list cleared</string>
     <string name="banner_kmod_missing">Kernel module not installed; kernel-layer hiding unavailable</string>
     <string name="banner_zygisk_missing">Native module not installed; Zygisk-layer hiding unavailable</string>
     <string name="pkg_inactive">Configured but not written to the kernel (LSPosed layer inactive)</string>
     <string name="pkg_inactive_kernel">Configured but not written: kernel layer is not running</string>
     <string name="pkg_inactive_lsposed">Configured but not written: LSPosed layer inactive, kernel list cleared</string>
-    <string name="hint_native_disabled">Native module is disabled: enable it in the root manager, then reboot</string>
 </resources>
