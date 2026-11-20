@@ -8,3 +8,7 @@ hostkey.txt
 hostkey.pub
 *.pem
 *.key
+
+# APK 构建产物（build-app.sh 会把 tools/ 和 build/ 的东西拷进来）
+app/assets/
+app/gen/
