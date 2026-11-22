@@ -26,22 +26,23 @@ public final class Tabs {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
 
-        row.addView(chip(host, host.getString(R.string.tab_hide), onHide, new View.OnClickListener() {
+        // Adbng is the default screen, so it sits on the left.
+        row.addView(chip(host, host.getString(R.string.tab_adbng), !onHide, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (!onHide)
-                    swap(host, true);
+                if (onHide)
+                    swap(host, false);
             }
         }));
 
         LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         gap.leftMargin = Ui.dp(host, 8);
-        row.addView(chip(host, host.getString(R.string.tab_adbng), !onHide, new View.OnClickListener() {
+        row.addView(chip(host, host.getString(R.string.tab_hide), onHide, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (onHide)
-                    swap(host, false);
+                if (!onHide)
+                    swap(host, true);
             }
         }), gap);
 
