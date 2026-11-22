@@ -87,9 +87,6 @@ public class MainActivity extends Activity {
     private TextView hint;
     private TextView tvSysState;
     private TextView tvReads;
-    private TextView tvUpdate;
-    private String updateText = "";
-    private String updateDetail = "";
     private LinearLayout bannerBox;
     // 没 root 时只画提示页，其它控件一概不建
     private boolean suOnly;
@@ -118,9 +115,6 @@ public class MainActivity extends Activity {
         super.onStart();
         ticker.removeCallbacks(tick);
         ticker.post(tick);
-        if (updateText.isEmpty()) {
-            checkUpdates();
-        }
     }
 
     @Override
@@ -200,9 +194,6 @@ public class MainActivity extends Activity {
                 : alive ? getString(R.string.state_active) : getString(R.string.state_inactive));
         tvSysState.setTextColor(master && alive ? Ui.OK : Ui.BAD);
         tvSysState.setBackground(Ui.bg(master && alive ? 0xFFE9F7EF : 0xFFFDECEC, 999, this));
-        if (tvUpdate != null) {
-            tvUpdate.setText(updateText);
-        }
         if (tvReads != null) {
             tvReads.setText(getString(R.string.reads_format, callGlobal("adb_enabled"), callGlobal("development_settings_enabled"), callGlobal("adb_wifi_enabled")));
         }
@@ -268,11 +259,8 @@ public class MainActivity extends Activity {
         root.setFitsSystemWindows(true);
         root.setBackgroundColor(Ui.BG);
 
-        LinearLayout tabHost = new LinearLayout(this);
-        tabHost.setOrientation(LinearLayout.VERTICAL);
-        tabHost.setPadding(dp(16), dp(22), dp(16), 0);
-        tabHost.addView(Tabs.bar(this, true));
-        root.addView(tabHost);
+        // tab 条、仓库链接、检查更新都由 Head 统一画在 ScrollView 外面
+        root.addView(Head.bar(this, true));
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -299,57 +287,6 @@ public class MainActivity extends Activity {
         }).start();
 
 
-        LinearLayout head = new LinearLayout(this);
-        head.setOrientation(LinearLayout.VERTICAL);
-        head.setPadding(0, 0, 0, dp(18));
-        // 页面名字已经由 tab 条表达，这里不再重复一行大标题
-        TextView headSub = Ui.sub(this, "github.com/SampleBlazkness/AdbHide-Kernel");
-        headSub.setIncludeFontPadding(false);
-        headSub.setPadding(0, 0, 0, 0);
-        headSub.setTextColor(Ui.ACCENT);
-        headSub.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                try {
-                    startActivity(new Intent(Intent.ACTION_VIEW,
-                            android.net.Uri.parse("https://github.com/SampleBlazkness/AdbHide-Kernel")));
-                } catch (Throwable ignored) {
-                }
-            }
-        });
-        head.addView(headSub);
-        body.addView(head);
-
-        LinearLayout updRow = new LinearLayout(this);
-        updRow.setOrientation(LinearLayout.HORIZONTAL);
-        updRow.setGravity(Gravity.CENTER_VERTICAL);
-        updRow.setPadding(0, dp(10), 0, dp(2));
-        tvUpdate = Ui.text(this, updateText, 11, Ui.MUTED);
-        tvUpdate.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (updateDetail == null || updateDetail.isEmpty()) {
-                    return;
-                }
-                new android.app.AlertDialog.Builder(MainActivity.this)
-                        .setTitle(getString(R.string.update_detail_title))
-                        .setMessage(updateDetail)
-                        .setPositiveButton(getString(R.string.ok), null)
-                        .show();
-            }
-        });
-        updRow.addView(tvUpdate, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView checkBtn = Ui.text(this, getString(R.string.check_update), 13, Ui.ACCENT);
-        checkBtn.setPadding(dp(10), dp(6), dp(2), dp(6));
-        checkBtn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                checkUpdates();
-            }
-        });
-        updRow.addView(checkBtn);
-        body.addView(updRow);
 
         bannerBox = new LinearLayout(this);
         bannerBox.setOrientation(LinearLayout.VERTICAL);
@@ -916,141 +853,6 @@ public class MainActivity extends Activity {
             Runtime.getRuntime().exec(new String[]{"su", "-c", sb.toString()}).waitFor();
         } catch (Throwable ignored) {
         }
-    }
-
-    private String appVersion() {
-        try {
-            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-        } catch (Throwable t) {
-            return "?";
-        }
-    }
-
-    private String moduleVersion(String path) {
-        Process p = null;
-        try {
-            p = Runtime.getRuntime().exec(new String[]{"su", "-c", "sed -n 's/^version=//p' " + path});
-            BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
-            String line = r.readLine();
-            r.close();
-            p.waitFor();
-            return line == null ? "" : line.trim().replace("v", "");
-        } catch (Throwable t) {
-            return "";
-        } finally {
-            if (p != null) {
-                p.destroy();
-            }
-        }
-    }
-
-    private String httpGet(String url) throws Exception {
-        java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
-        c.setConnectTimeout(8000);
-        c.setReadTimeout(8000);
-        c.setRequestProperty("Accept", "application/vnd.github+json");
-        StringBuilder sb = new StringBuilder();
-        BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream()));
-        String line;
-        while ((line = r.readLine()) != null) {
-            sb.append(line);
-        }
-        r.close();
-        c.disconnect();
-        return sb.toString();
-    }
-
-    private String between(String s, String a, String b) {
-        int i = s.indexOf(a);
-        if (i < 0) {
-            return "";
-        }
-        i += a.length();
-        int j = s.indexOf(b, i);
-        return j < 0 ? "" : s.substring(i, j);
-    }
-
-    private boolean isNewer(String latest, String current) {
-        if (latest == null || latest.isEmpty() || current == null || current.isEmpty()) {
-            return false;
-        }
-        String[] a = latest.split("[.]");
-        String[] b = current.split("[.]");
-        for (int i = 0; i < Math.max(a.length, b.length); i++) {
-            int x = i < a.length ? num(a[i]) : 0;
-            int y = i < b.length ? num(b[i]) : 0;
-            if (x != y) {
-                return x > y;
-            }
-        }
-        return false;
-    }
-
-    private void checkUpdates() {
-        if (tvUpdate == null) {
-            return;
-        }
-        updateText = getString(R.string.update_checking);
-        if (tvUpdate != null) {
-            tvUpdate.setText(updateText);
-        }
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                String out;
-                try {
-                    String appVer = appVersion();
-                    String kVer = moduleVersion("/data/adb/modules/adbhide_kmod/module.prop");
-                    String nVer = moduleVersion("/data/adb/modules/adbhide_native/module.prop");
-                    JSONObject o = new JSONObject(httpGet(
-                            "https://api.github.com/repos/SampleBlazkness/AdbHide-Kernel/releases/latest"));
-                    String tag = o.optString("tag_name", "").replace("v", "");
-                    String kLatest = "";
-                    String nLatest = "";
-                    JSONArray assets = o.optJSONArray("assets");
-                    if (assets != null) {
-                        for (int i = 0; i < assets.length(); i++) {
-                            String n = assets.getJSONObject(i).optString("name", "");
-                            if (n.contains("kmod-v")) {
-                                kLatest = between(n, "kmod-v", ".zip");
-                            }
-                            if (n.contains("native-v")) {
-                                nLatest = between(n, "native-v", ".zip");
-                            }
-                        }
-                    }
-                    StringBuilder sb = new StringBuilder();
-                    StringBuilder detail = new StringBuilder();
-                    int hits = 0;
-                    if (isNewer(tag, appVer)) {
-                        hits++;
-                        detail.append(getString(R.string.mod_app)).append(" ").append(appVer).append(" → ").append(tag).append("\n");
-                    }
-                    if (!kVer.isEmpty() && isNewer(kLatest, kVer)) {
-                        hits++;
-                        detail.append(getString(R.string.mod_kernel)).append(" ").append(kVer).append(" → ").append(kLatest).append("\n");
-                    }
-                    if (!nVer.isEmpty() && isNewer(nLatest, nVer)) {
-                        hits++;
-                        detail.append("Zygisk ").append(nVer).append(" → ").append(nLatest).append("\n");
-                    }
-                    updateDetail = detail.toString().trim();
-                    out = hits == 0 ? getString(R.string.update_latest) : getString(R.string.update_available, hits);
-                } catch (Throwable t) {
-                    out = getString(R.string.update_failed);
-                }
-                final String text = out;
-                runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        updateText = text;
-                        if (tvUpdate != null) {
-                            tvUpdate.setText(updateText);
-                        }
-                    }
-                });
-            }
-        }).start();
     }
 
     private State readState() {
