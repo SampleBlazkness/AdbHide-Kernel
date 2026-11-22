@@ -302,11 +302,7 @@ public class MainActivity extends Activity {
         LinearLayout head = new LinearLayout(this);
         head.setOrientation(LinearLayout.VERTICAL);
         head.setPadding(0, 0, 0, dp(18));
-        TextView title = Ui.text(this, "AdbHide", 24, Ui.INK);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setIncludeFontPadding(false);
-        title.setPadding(0, 0, 0, dp(4));
-        head.addView(title);
+        // 页面名字已经由 tab 条表达，这里不再重复一行大标题
         TextView headSub = Ui.sub(this, "github.com/SampleBlazkness/AdbHide-Kernel");
         headSub.setIncludeFontPadding(false);
         headSub.setPadding(0, 0, 0, 0);
