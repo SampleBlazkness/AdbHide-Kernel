@@ -39,11 +39,9 @@
     <string name="ok">OK</string>
     <string name="banner_su">su unavailable, grant root to AdbHide in KernelSU</string>
     <string name="banner_lsp_missing">LSPosed is not installed; the hide list cannot work</string>
-    <string name="banner_lsp_scope">LSPosed is installed but this module is inactive: enable AdbHide in LSPosed and tick its scope, then reboot</string>
-    <string name="su_gate_title">Root permission required</string>
-    <string name="su_gate_msg">Every probe depends on su. Without it the results are wrong (installed modules read as missing), so no state is shown until you grant it.\n\nTap “Allow” in the KernelSU / Magisk prompt, then tap Retry.</string>
+    <string name="banner_lsp_scope">LSPosed is installed but this module is not enabled</string>
+    <string name="su_gate_msg">Please grant root permission to this app</string>
     <string name="su_gate_retry">Retry</string>
-    <string name="su_gate_exit">Exit</string>
     <string name="picker_title">Select apps to hide</string>
     <string name="picker_show_system">Show system apps</string>
     <string name="save_sync">Save and sync</string>

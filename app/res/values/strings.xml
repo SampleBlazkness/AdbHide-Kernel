@@ -39,11 +39,9 @@
     <string name="ok">知道了</string>
     <string name="banner_su">su 不可用，请先在 KernelSU 中授权 AdbHide</string>
     <string name="banner_lsp_missing">LSPosed 未安装，隐藏名单无法生效</string>
-    <string name="banner_lsp_scope">LSPosed 已安装但本模块未生效：在 LSPosed 中启用 AdbHide 并勾选作用域后重启</string>
-    <string name="su_gate_title">需要 root 授权</string>
-    <string name="su_gate_msg">模块状态的检测依赖 su。未授权时所有探测结果都是错的（会把已安装读成未安装），所以在授权前不显示任何状态。\n\n请在弹出的 KernelSU / Magisk 提示里点“允许”，然后点“重新检测”。</string>
+    <string name="banner_lsp_scope">LSPosed 已安装但本模块未被启用</string>
+    <string name="su_gate_msg">请授予本程序 root 权限</string>
     <string name="su_gate_retry">重新检测</string>
-    <string name="su_gate_exit">退出</string>
     <string name="picker_title">选择要隐藏的应用</string>
     <string name="picker_show_system">显示系统应用</string>
     <string name="save_sync">保存并同步</string>

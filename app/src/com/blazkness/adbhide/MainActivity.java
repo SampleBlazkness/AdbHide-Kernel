@@ -91,7 +91,8 @@ public class MainActivity extends Activity {
     private String updateText = "";
     private String updateDetail = "";
     private LinearLayout bannerBox;
-    private android.app.Dialog suGate;
+    // 没 root 时只画提示页，其它控件一概不建
+    private boolean suOnly;
 
     private final java.util.Map<String, String> pending = new java.util.HashMap<String, String>();
     private long pendingUntil = 0L;
@@ -102,8 +103,8 @@ public class MainActivity extends Activity {
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
-            // 授权框被系统挡在后面时用户看不到提示，这里自己每秒看一眼，2.5s 重试一次
-            if (suGate != null && System.currentTimeMillis() >= suRetryAt) {
+            // 授权框可能被系统挡在后面，这里自己每秒看一眼，2.5s 重试一次
+            if (suOnly && System.currentTimeMillis() >= suRetryAt) {
                 suRetryAt = System.currentTimeMillis() + 2500L;
                 refresh();
             }
@@ -157,6 +158,10 @@ public class MainActivity extends Activity {
     }
 
     private void updateLive() {
+        // 提示页上没有别的控件，没必要刷新
+        if (body == null || suOnly) {
+            return;
+        }
         String state = callGlobal("adbhide_props_state");
         if (state != null && state.indexOf(',') > 0) {
             String[] parts = state.split(",");
@@ -246,7 +251,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        buildUi();
+        // 先判定 root：有 root 才建界面，没有就只画提示页
         ensureConfig();
         refresh();
         Log.i("AdbHideDbg", "adb=" + Settings.Global.getInt(getContentResolver(), "adb_enabled", -1)
@@ -654,7 +659,15 @@ public class MainActivity extends Activity {
     }
 
     private void render(State st) {
-        updateSuGate(st.suOk);
+        // 没有 root：其余探测全不可信，只画提示页，后续渲染一律不做
+        if (!st.suOk) {
+            showSuOnly();
+            return;
+        }
+        if (body == null || suOnly) {
+            suOnly = false;
+            buildUi();
+        }
         binding = true;
         setSwitch(swMaster, !"0".equals(props.get("master")));
         setSwitch(swDev, !"0".equals(props.get("dev")));
@@ -747,74 +760,43 @@ public class MainActivity extends Activity {
         hint.setText("");
     }
 
-    /**
-     * 没有 root 时下面所有探测都是假的（未安装 / 未启用全是误报），
-     * 所以先挡住界面，逼用户去 KernelSU / Magisk 授权。
-     * 授权提示框可能被系统挡在后面，所以每 2.5 秒自己重试一次。
-     */
-    private void updateSuGate(boolean suOk) {
-        if (!suOk) {
-            if (suGate != null) {
-                return;
-            }
-            final android.app.Dialog d = new android.app.Dialog(this);
-            d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
-            LinearLayout outer = new LinearLayout(this);
-            outer.setOrientation(LinearLayout.VERTICAL);
-            int pad = dp(18);
-            outer.setPadding(pad, pad, pad, pad);
-            LinearLayout card = Ui.card(this);
-            card.setPadding(dp(20), dp(18), dp(20), dp(16));
-            card.addView(Ui.title(this, getString(R.string.su_gate_title)));
-            TextView msg = Ui.text(this, getString(R.string.su_gate_msg), 12.5f, Ui.MUTED);
-            msg.setPadding(0, dp(10), 0, dp(18));
-            msg.setLineSpacing(dp(4), 1f);
-            card.addView(msg);
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            TextView exit = Ui.action(this, getString(R.string.su_gate_exit), false);
-            TextView retry = Ui.action(this, getString(R.string.su_gate_retry), true);
-            LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-            left.rightMargin = dp(10);
-            row.addView(exit, left);
-            row.addView(retry, new LinearLayout.LayoutParams(0,
-                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-            card.addView(row);
-            outer.addView(card);
-            exit.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    finish();
-                }
-            });
-            retry.setOnClickListener(new View.OnClickListener() {
-                @Override
-                public void onClick(View v) {
-                    suGate = null;
-                    d.dismiss();
-                    refresh();
-                }
-            });
-            d.setContentView(outer);
-            d.setCancelable(false);
-            d.setCanceledOnTouchOutside(false);
-            d.show();
-            android.view.Window w = d.getWindow();
-            if (w != null) {
-                w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0));
-                w.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-                android.view.WindowManager.LayoutParams lp = w.getAttributes();
-                lp.dimAmount = 0.45f;
-                w.setAttributes(lp);
-                w.setLayout(LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT);
-            }
-            suGate = d;
-        } else if (suGate != null) {
-            suGate.dismiss();
-            suGate = null;
+    /** 没有 root 时只渲染这一张提示卡，其它视图一律不建。 */
+    private void showSuOnly() {
+        if (suOnly) {
+            return;
         }
+        suOnly = true;
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setFitsSystemWindows(true);
+        scroll.setBackgroundColor(Ui.BG);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        box.setPadding(dp(26), dp(26), dp(26), dp(26));
+        LinearLayout card = Ui.card(this);
+        card.setPadding(dp(22), dp(20), dp(22), dp(16));
+        TextView msg = Ui.text(this, getString(R.string.su_gate_msg), 15, Ui.INK);
+        msg.setGravity(Gravity.CENTER_HORIZONTAL);
+        msg.setLineSpacing(dp(4), 1f);
+        card.addView(msg);
+        TextView retry = Ui.action(this, getString(R.string.su_gate_retry), true);
+        retry.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                refresh();
+            }
+        });
+        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        rp.topMargin = dp(18);
+        card.addView(retry, rp);
+        box.addView(card);
+        scroll.addView(box, new ScrollView.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.MATCH_PARENT));
+        setContentView(scroll);
     }
 
     /** Configured entry that is not in the kernel list: no per-row status, no delete. */
