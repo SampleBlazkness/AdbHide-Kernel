@@ -60,7 +60,8 @@ public class MainActivity extends Activity {
         Sh.init(this);
         setContentView(R.layout.activity_main);
         ((LinearLayout) findViewById(R.id.tabHost))
-                .addView(com.blazkness.adbhide.Tabs.bar(this, true));
+                // false = this is the Adbng screen, not the AdbHide one
+                .addView(com.blazkness.adbhide.Tabs.bar(this, false));
 
         sw = findViewById(R.id.sw);
         tvSub = findViewById(R.id.tvSub);

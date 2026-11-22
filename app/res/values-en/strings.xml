@@ -62,8 +62,8 @@
     <string name="pkg_inactive_lsposed">Configured but not written: LSPosed layer inactive, kernel list cleared</string>
 
     <!-- adbng screen -->
-    <string name="tab_hide">Hide</string>
-    <string name="tab_adbng">adbng</string>
+    <string name="tab_hide">AdbHide</string>
+    <string name="tab_adbng">Adbng</string>
     <string name="adbng_sub">Userspace adb, bypasses the system adbd</string>
     <string name="adbng_status_loading">Reading status…</string>
     <string name="adbng_refresh">Refresh</string>
@@ -90,10 +90,10 @@
     <string name="adbng_fp">Fingerprint %1$s</string>
     <string name="adbng_since">Requested %1$s</string>
     <string name="adbng_no_log">(no log yet)</string>
-    <string name="adbng_starting">Starting adbng…</string>
-    <string name="adbng_stopping">Stopping adbng…</string>
+    <string name="adbng_starting">Starting Adbng…</string>
+    <string name="adbng_stopping">Stopping Adbng…</string>
     <string name="adbng_op_failed">Failed (rc=%1$d)</string>
-    <string name="adbng_stop_title">Stop adbng</string>
+    <string name="adbng_stop_title">Stop Adbng</string>
     <string name="adbng_stop_msg">The system adb will not come back automatically; re-enable it in Developer options.</string>
     <string name="adbng_stop_ok">Stop</string>
     <string name="adbng_case_allow">allowed</string>

@@ -27,7 +27,7 @@
             android:name="com.blazkness.adbng.MainActivity"
             android:exported="true"
             android:screenOrientation="portrait"
-            android:label="AdbHide">
+            android:label="Adbng">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

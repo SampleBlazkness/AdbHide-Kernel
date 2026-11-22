@@ -62,8 +62,8 @@
     <string name="pkg_inactive_lsposed">已配置，LSPosed 层未生效，内核名单已清空</string>
 
     <!-- adbng 页 -->
-    <string name="tab_hide">隐藏</string>
-    <string name="tab_adbng">adbng</string>
+    <string name="tab_hide">AdbHide</string>
+    <string name="tab_adbng">Adbng</string>
     <string name="adbng_sub">用户态 adb，不经过系统 adbd</string>
     <string name="adbng_status_loading">读取状态中…</string>
     <string name="adbng_refresh">刷新</string>
@@ -90,10 +90,10 @@
     <string name="adbng_fp">指纹 %1$s</string>
     <string name="adbng_since">请求时间 %1$s</string>
     <string name="adbng_no_log">（暂无日志）</string>
-    <string name="adbng_starting">正在启动 adbng…</string>
-    <string name="adbng_stopping">正在停止 adbng…</string>
+    <string name="adbng_starting">正在启动 Adbng…</string>
+    <string name="adbng_stopping">正在停止 Adbng…</string>
     <string name="adbng_op_failed">操作失败（rc=%1$d）</string>
-    <string name="adbng_stop_title">关闭 adbng</string>
+    <string name="adbng_stop_title">关闭 Adbng</string>
     <string name="adbng_stop_msg">关闭后系统 adb 不会自动恢复，需要手动在开发者选项里重新打开。</string>
     <string name="adbng_stop_ok">关闭</string>
     <string name="adbng_case_allow">允许</string>

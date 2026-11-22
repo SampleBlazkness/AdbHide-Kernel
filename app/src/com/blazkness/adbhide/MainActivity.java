@@ -274,7 +274,7 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
         setContentView(scroll);
-        body.addView(Tabs.bar(this, false));
+        body.addView(Tabs.bar(this, true));
 
         new Thread(new Runnable() {
             @Override
