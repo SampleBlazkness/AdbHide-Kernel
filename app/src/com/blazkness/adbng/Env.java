@@ -62,7 +62,7 @@ final class Env {
                 os.write(BOOT.getBytes("UTF-8"));
             }
         } catch (Exception e) {
-            return "解包失败：" + e.getMessage();
+            return ctx.getString(R.string.adbng_unpack_failed, String.valueOf(e.getMessage()));
         }
 
         String cmd = "mkdir -p " + Sh.DIR + " /data/adb/service.d"
@@ -74,9 +74,9 @@ final class Env {
                 + " && chmod 600 " + Sh.DIR + "/adb_keys; ls -l " + Sh.DIR;
         Sh.R r = Sh.run(cmd);
         if (!r.ok()) {
-            return "安装运行环境失败：" + r.text();
+            return ctx.getString(R.string.adbng_install_failed, r.text());
         }
-        return installed(ctx) ? null : "安装后校验失败，请重试";
+        return installed(ctx) ? null : ctx.getString(R.string.adbng_verify_failed);
     }
 
     private static void copyAsset(Context ctx, String name, File dst) throws Exception {

@@ -9,10 +9,14 @@ import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-/** Top tab bar shared by the two screens: 隐藏 (adbhide) and adbng. */
+// the merged app is built with com.blazkness.adbng as its package, so R lives there
+import com.blazkness.adbng.R;
+
+/** Top tab bar shared by the two screens: the hide list (adbhide) and adbng. */
 public final class Tabs {
 
     private static final String TAG = "adbngTabs";
+    private static final int CHIP_STROKE = 0xFFD7DBE2;
 
     private Tabs() {
     }
@@ -22,7 +26,7 @@ public final class Tabs {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
 
-        row.addView(chip(host, "隐藏", onHide, new View.OnClickListener() {
+        row.addView(chip(host, host.getString(R.string.tab_hide), onHide, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 if (!onHide)
@@ -33,7 +37,7 @@ public final class Tabs {
         LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         gap.leftMargin = Ui.dp(host, 8);
-        row.addView(chip(host, "adbng", !onHide, new View.OnClickListener() {
+        row.addView(chip(host, host.getString(R.string.tab_adbng), !onHide, new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 if (onHide)
@@ -72,9 +76,11 @@ public final class Tabs {
         int padH = Ui.dp(host, 16);
         int padV = Ui.dp(host, 8);
         tv.setPadding(padH, padV, padH, padV);
+        // Both states carry a 1dp stroke on purpose: a filled chip without a stroke
+        // measures 2dp narrower than an outlined one, which shifted the row on switch.
         tv.setBackground(active
-                ? Ui.bg(Ui.ACCENT, 999, host)
-                : Ui.bg(Ui.CARD, 999, 0xFFD7DBE2, host));
+                ? Ui.bg(Ui.ACCENT, 999, Ui.ACCENT, host)
+                : Ui.bg(Ui.CARD, 999, CHIP_STROKE, host));
         tv.setClickable(true);
         tv.setOnClickListener(l);
         return tv;

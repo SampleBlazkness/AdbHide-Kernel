@@ -15,9 +15,16 @@
         android:theme="@style/AppTheme"
         android:label="AdbHide">
 
-        <!-- 隐藏名单（原 AdbHide 界面），也是 Xposed 模块的宿主 -->
+        <!-- adbhide 界面：从 adbng 页的 tab 条进入 -->
         <activity
             android:name="com.blazkness.adbhide.MainActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:label="AdbHide" />
+
+        <!-- adbng 面板，默认页 -->
+        <activity
+            android:name="com.blazkness.adbng.MainActivity"
             android:exported="true"
             android:screenOrientation="portrait"
             android:label="AdbHide">
@@ -26,13 +33,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- adbng 面板，由上面的 tab 条启动 -->
-        <activity
-            android:name="com.blazkness.adbng.MainActivity"
-            android:exported="false"
-            android:screenOrientation="portrait"
-            android:label="adbng" />
 
         <meta-data
             android:name="xposedmodule"

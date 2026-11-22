@@ -57,9 +57,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        Sh.init(this);
         setContentView(R.layout.activity_main);
         ((LinearLayout) findViewById(R.id.tabHost))
-                .addView(com.blazkness.adbhide.Tabs.bar(this, false));
+                .addView(com.blazkness.adbhide.Tabs.bar(this, true));
 
         sw = findViewById(R.id.sw);
         tvSub = findViewById(R.id.tvSub);
@@ -111,8 +112,9 @@ public class MainActivity extends Activity {
                     ui.post(new Runnable() {
                         @Override
                         public void run() {
-                            msg(err == null ? "运行环境已安装到 /data/adb/adbng" : err,
-                                    err != null);
+                            msg(err == null
+                                    ? getString(R.string.adbng_env_installed, Sh.DIR)
+                                    : err, err != null);
                         }
                     });
                 }
@@ -122,7 +124,7 @@ public class MainActivity extends Activity {
                 ui.post(new Runnable() {
                     @Override
                     public void run() {
-                        msg("没有拿到 root：开关不可用", true);
+                        msg(getString(R.string.adbng_no_root), true);
                         sw.setEnabled(false);
                     }
                 });
@@ -177,18 +179,25 @@ public class MainActivity extends Activity {
     private void render(Map<String, String> st, Ctl.Pending pend, List<Ctl.Row> rows, String log) {
         String err = st.get("error");
         if (err != null) {
-            tvStatus.setText("读取状态失败\n" + err);
+            tvStatus.setText(getString(R.string.adbng_read_failed, err));
         } else {
-            String adbd = "running".equals(st.get("adbd")) ? "运行中" : "已关闭";
+            String adbd = getString("running".equals(st.get("adbd"))
+                    ? R.string.adbng_adbd_on : R.string.adbng_adbd_off);
             String adbng = "running".equals(st.get("state"))
-                    ? "运行中（pid " + st.get("usbgwd_pid") + "）" : "已停止";
+                    ? getString(R.string.adbng_running_pid,
+                            String.valueOf(st.get("usbgwd_pid")))
+                    : getString(R.string.adbng_stopped);
             String udc = st.get("udc_state");
-            String link = "present".equals(st.get("adbng_link")) ? "已接入 USB" : "未接入";
-            tvStatus.setText("系统 adb：" + adbd
-                    + "\nadbng：" + adbng
-                    + "\nUSB：" + link + "（" + (udc == null || udc.isEmpty() ? "未知" : udc) + "）"
-                    + "\n已配对密钥：" + (st.get("keys") == null ? "-" : st.get("keys")) + " 条"
-                    + "\n开关记忆：" + ("1".equals(st.get("enabled")) ? "开机自动启动" : "关闭"));
+            if (udc == null || udc.isEmpty()) {
+                udc = getString(R.string.adbng_unknown);
+            }
+            String link = getString("present".equals(st.get("adbng_link"))
+                    ? R.string.adbng_usb_present : R.string.adbng_usb_absent);
+            String keys = st.get("keys") == null ? "-" : st.get("keys");
+            String memory = getString("1".equals(st.get("enabled"))
+                    ? R.string.adbng_boot_on : R.string.adbng_off);
+            tvStatus.setText(getString(R.string.adbng_status_format,
+                    adbd, adbng, link, udc, keys, memory));
         }
 
         updatingSwitch = true;
@@ -200,23 +209,28 @@ public class MainActivity extends Activity {
             shownFp = null;
         } else {
             cardPending.setVisibility(View.VISIBLE);
-            tvPending.setText("来自 " + pend.host
-                    + "\n指纹 " + pend.fp
-                    + (pend.since.isEmpty() ? "" : "\n请求时间 " + pend.since));
+            StringBuilder pb = new StringBuilder(getString(R.string.adbng_from, pend.host));
+            pb.append('\n').append(getString(R.string.adbng_fp, pend.fp));
+            if (!pend.since.isEmpty()) {
+                pb.append('\n').append(getString(R.string.adbng_since, pend.since));
+            }
+            tvPending.setText(pb.toString());
             if (!pend.fp.equals(shownFp)) {
                 shownFp = pend.fp;
             }
         }
 
         if (rows.isEmpty()) {
-            tvDevices.setText("还没有记录");
+            tvDevices.setText(getString(R.string.adbng_no_devices));
         } else {
             StringBuilder sb = new StringBuilder();
             int n = Math.min(rows.size(), 8);
             for (int i = 0; i < n; i++) {
                 Ctl.Row r = rows.get(i);
                 sb.append(r.stamp).append("  ")
-                        .append("allow".equals(r.verdict) ? "允许" : "拒绝").append("  ")
+                        .append(getString("allow".equals(r.verdict)
+                                ? R.string.adbng_case_allow : R.string.adbng_case_deny))
+                        .append("  ")
                         .append(r.fp.length() > 8 ? r.fp.substring(0, 8) : r.fp);
                 if (!r.host.isEmpty()) {
                     sb.append("  ").append(r.host);
@@ -226,12 +240,12 @@ public class MainActivity extends Activity {
             tvDevices.setText(sb.toString().trim());
         }
 
-        tvLog.setText(log.isEmpty() ? "（暂无日志）" : log);
+        tvLog.setText(log.isEmpty() ? getString(R.string.adbng_no_log) : log);
     }
 
     private void toggle(final boolean on) {
         busy = true;
-        msg(on ? "正在启动 adbng…" : "正在停止 adbng…", false);
+        msg(getString(on ? R.string.adbng_starting : R.string.adbng_stopping), false);
         work.execute(new Runnable() {
             @Override
             public void run() {
@@ -241,9 +255,10 @@ public class MainActivity extends Activity {
                     public void run() {
                         busy = false;
                         String out = r.text();
-                        // the script already speaks Chinese for its refusals
+                        // adbngctl.sh still answers in Chinese on refusal; show it as is
                         if (!r.ok()) {
-                            msg(out.isEmpty() ? "操作失败（rc=" + r.code + "）" : out, true);
+                            msg(out.isEmpty()
+                                    ? getString(R.string.adbng_op_failed, r.code) : out, true);
                             updatingSwitch = true;
                             sw.setChecked(false);
                             updatingSwitch = false;
@@ -287,9 +302,9 @@ public class MainActivity extends Activity {
     @SuppressWarnings("unused")
     private void confirmStop() {
         new AlertDialog.Builder(this)
-                .setTitle("关闭 adbng")
-                .setMessage("关闭后系统 adb 不会自动恢复，需要手动在开发者选项里重新打开。")
-                .setPositiveButton("关闭", null)
+                .setTitle(R.string.adbng_stop_title)
+                .setMessage(R.string.adbng_stop_msg)
+                .setPositiveButton(R.string.adbng_stop_ok, null)
                 .show();
     }
 }

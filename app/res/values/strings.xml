@@ -52,12 +52,54 @@
     <string name="mod_enabled">已启用</string>
     <string name="mod_installed">已安装</string>
     <string name="mod_enabled_not_loaded">已启用，未加载</string>
-    <string name="banner_kmod_disabled">内核模块已安装但未启用：在 KernelSU 中启用后重启</string>
-    <string name="banner_zygisk_disabled">Native 模块已安装但未启用：在 KernelSU 中启用后重启</string>
+    <string name="banner_kmod_disabled">内核模块已安装但未启用</string>
+    <string name="banner_zygisk_disabled">Native 模块已安装但未启用</string>
     <string name="list_empty_inactive">名单为空 · LSPosed 层未生效，内核名单已清空</string>
     <string name="banner_kmod_missing">内核模块未安装，内核层隐藏不可用</string>
     <string name="banner_zygisk_missing">Native 模块未安装，Zygisk 层隐藏不可用</string>
     <string name="pkg_inactive">已配置，未写入内核（LSPosed 层未生效）</string>
     <string name="pkg_inactive_kernel">已配置，内核层未运行，未写入内核</string>
     <string name="pkg_inactive_lsposed">已配置，LSPosed 层未生效，内核名单已清空</string>
+
+    <!-- adbng 页 -->
+    <string name="tab_hide">隐藏</string>
+    <string name="tab_adbng">adbng</string>
+    <string name="adbng_sub">用户态 adb，不经过系统 adbd</string>
+    <string name="adbng_status_loading">读取状态中…</string>
+    <string name="adbng_refresh">刷新</string>
+    <string name="adbng_pending_title">有电脑请求连接</string>
+    <string name="adbng_allow">允许</string>
+    <string name="adbng_deny">拒绝</string>
+    <string name="adbng_devices_title">设备记录</string>
+    <string name="adbng_no_devices">还没有记录</string>
+    <string name="adbng_log_title">日志</string>
+    <string name="adbng_env_installed">运行环境已安装到 %1$s</string>
+    <string name="adbng_no_root">没有拿到 root：开关不可用</string>
+    <string name="adbng_read_failed">读取状态失败\n%1$s</string>
+    <string name="adbng_adbd_on">运行中</string>
+    <string name="adbng_adbd_off">已关闭</string>
+    <string name="adbng_running_pid">运行中（pid %1$s）</string>
+    <string name="adbng_stopped">已停止</string>
+    <string name="adbng_usb_present">已接入 USB</string>
+    <string name="adbng_usb_absent">未接入</string>
+    <string name="adbng_unknown">未知</string>
+    <string name="adbng_boot_on">开机自动启动</string>
+    <string name="adbng_off">关闭</string>
+    <string name="adbng_status_format">系统 adb：%1$s\nadbng：%2$s\nUSB：%3$s（%4$s）\n已配对密钥：%5$s 条\n开关记忆：%6$s</string>
+    <string name="adbng_from">来自 %1$s</string>
+    <string name="adbng_fp">指纹 %1$s</string>
+    <string name="adbng_since">请求时间 %1$s</string>
+    <string name="adbng_no_log">（暂无日志）</string>
+    <string name="adbng_starting">正在启动 adbng…</string>
+    <string name="adbng_stopping">正在停止 adbng…</string>
+    <string name="adbng_op_failed">操作失败（rc=%1$d）</string>
+    <string name="adbng_stop_title">关闭 adbng</string>
+    <string name="adbng_stop_msg">关闭后系统 adb 不会自动恢复，需要手动在开发者选项里重新打开。</string>
+    <string name="adbng_stop_ok">关闭</string>
+    <string name="adbng_case_allow">允许</string>
+    <string name="adbng_case_deny">拒绝</string>
+    <string name="adbng_su_failed">无法执行 su：%1$s</string>
+    <string name="adbng_unpack_failed">解包失败：%1$s</string>
+    <string name="adbng_install_failed">安装运行环境失败：%1$s</string>
+    <string name="adbng_verify_failed">安装后校验失败，请重试</string>
 </resources>

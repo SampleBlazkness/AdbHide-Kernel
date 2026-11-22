@@ -52,12 +52,54 @@
     <string name="mod_enabled">Enabled</string>
     <string name="mod_installed">Installed</string>
     <string name="mod_enabled_not_loaded">Enabled, not loaded</string>
-    <string name="banner_kmod_disabled">Kernel module is installed but not enabled: enable it in KernelSU, then reboot</string>
-    <string name="banner_zygisk_disabled">Native module is installed but not enabled: enable it in KernelSU, then reboot</string>
+    <string name="banner_kmod_disabled">Kernel module is installed but not enabled</string>
+    <string name="banner_zygisk_disabled">Native module is installed but not enabled</string>
     <string name="list_empty_inactive">List empty: the LSPosed layer is inactive, kernel list cleared</string>
     <string name="banner_kmod_missing">Kernel module not installed; kernel-layer hiding unavailable</string>
     <string name="banner_zygisk_missing">Native module not installed; Zygisk-layer hiding unavailable</string>
     <string name="pkg_inactive">Configured but not written to the kernel (LSPosed layer inactive)</string>
     <string name="pkg_inactive_kernel">Configured but not written: kernel layer is not running</string>
     <string name="pkg_inactive_lsposed">Configured but not written: LSPosed layer inactive, kernel list cleared</string>
+
+    <!-- adbng screen -->
+    <string name="tab_hide">Hide</string>
+    <string name="tab_adbng">adbng</string>
+    <string name="adbng_sub">Userspace adb, bypasses the system adbd</string>
+    <string name="adbng_status_loading">Reading status…</string>
+    <string name="adbng_refresh">Refresh</string>
+    <string name="adbng_pending_title">A host wants to connect</string>
+    <string name="adbng_allow">Allow</string>
+    <string name="adbng_deny">Deny</string>
+    <string name="adbng_devices_title">Devices</string>
+    <string name="adbng_no_devices">No records yet</string>
+    <string name="adbng_log_title">Log</string>
+    <string name="adbng_env_installed">Runtime installed to %1$s</string>
+    <string name="adbng_no_root">No root: the switch is disabled</string>
+    <string name="adbng_read_failed">Cannot read status\n%1$s</string>
+    <string name="adbng_adbd_on">Running</string>
+    <string name="adbng_adbd_off">Off</string>
+    <string name="adbng_running_pid">Running (pid %1$s)</string>
+    <string name="adbng_stopped">Stopped</string>
+    <string name="adbng_usb_present">USB attached</string>
+    <string name="adbng_usb_absent">Not attached</string>
+    <string name="adbng_unknown">unknown</string>
+    <string name="adbng_boot_on">starts on boot</string>
+    <string name="adbng_off">off</string>
+    <string name="adbng_status_format">System adb: %1$s\nadbng: %2$s\nUSB: %3$s (%4$s)\nPaired keys: %5$s\nSwitch memory: %6$s</string>
+    <string name="adbng_from">From %1$s</string>
+    <string name="adbng_fp">Fingerprint %1$s</string>
+    <string name="adbng_since">Requested %1$s</string>
+    <string name="adbng_no_log">(no log yet)</string>
+    <string name="adbng_starting">Starting adbng…</string>
+    <string name="adbng_stopping">Stopping adbng…</string>
+    <string name="adbng_op_failed">Failed (rc=%1$d)</string>
+    <string name="adbng_stop_title">Stop adbng</string>
+    <string name="adbng_stop_msg">The system adb will not come back automatically; re-enable it in Developer options.</string>
+    <string name="adbng_stop_ok">Stop</string>
+    <string name="adbng_case_allow">allowed</string>
+    <string name="adbng_case_deny">denied</string>
+    <string name="adbng_su_failed">Cannot run su: %1$s</string>
+    <string name="adbng_unpack_failed">Cannot unpack: %1$s</string>
+    <string name="adbng_install_failed">Cannot install the runtime: %1$s</string>
+    <string name="adbng_verify_failed">Verification failed, try again</string>
 </resources>

@@ -1,5 +1,7 @@
 package com.blazkness.adbng;
 
+import android.content.Context;
+
 import java.io.ByteArrayOutputStream;
 
 /** Thin wrapper around "su -c": every command in this app goes through it. */
@@ -7,6 +9,9 @@ final class Sh {
 
     static final String DIR = "/data/adb/adbng";
     static final String CTL = DIR + "/adbngctl.sh";
+
+    /** Set once from the activity, only used to localise the failure message. */
+    private static Context app;
 
     static final class R {
         int code = -1;
@@ -19,6 +24,16 @@ final class Sh {
         String text() {
             return out.trim();
         }
+    }
+
+    static void init(Context c) {
+        app = c == null ? null : c.getApplicationContext();
+    }
+
+    private static String su(String detail) {
+        return app == null
+                ? "su: " + detail
+                : app.getString(com.blazkness.adbng.R.string.adbng_su_failed, detail);
     }
 
     static R run(String cmd) {
@@ -36,7 +51,7 @@ final class Sh {
             r.out = bo.toString("UTF-8");
         } catch (Throwable t) {
             r.code = -2;
-            r.out = "无法执行 su：" + t.getMessage();
+            r.out = su(String.valueOf(t.getMessage()));
         } finally {
             if (p != null) {
                 p.destroy();
