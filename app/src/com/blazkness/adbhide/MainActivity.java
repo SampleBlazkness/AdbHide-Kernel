@@ -93,17 +93,19 @@ public class MainActivity extends Activity {
 
     private final java.util.Map<String, String> pending = new java.util.HashMap<String, String>();
     private long pendingUntil = 0L;
-    private long suRetryAt = 0L;
+    private long suCheckedAt = 0L;
+    private volatile boolean suCheckBusy;
     private volatile boolean masterOn = true;
 
     private final Handler ticker = new Handler(Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
-            // 授权框可能被系统挡在后面，这里自己每秒看一眼，2.5s 重试一次
-            if (suOnly && System.currentTimeMillis() >= suRetryAt) {
-                suRetryAt = System.currentTimeMillis() + 2500L;
-                refresh();
+            // 每 5 秒复查一次 su；失败就把整屏换成授权提示
+            long now = System.currentTimeMillis();
+            if (!suCheckBusy && now >= suCheckedAt + 5000L) {
+                suCheckedAt = now;
+                checkSu();
             }
             updateLive();
             ticker.postDelayed(this, 1000);
@@ -115,6 +117,11 @@ public class MainActivity extends Activity {
         super.onStart();
         ticker.removeCallbacks(tick);
         ticker.post(tick);
+        // 从后台被拉起：立刻复查一次 root 并重画
+        suCheckedAt = 0L;
+        if (body != null) {
+            refresh();
+        }
     }
 
     @Override
@@ -133,8 +140,88 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** 每 5 秒复查一次 su；失败就整屏换成授权提示（su 失败本身会拉起系统授权框）。 */
+    private void checkSu() {
+        if (suCheckBusy) {
+            return;
+        }
+        suCheckBusy = true;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final boolean ok = suAlive();
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        suCheckBusy = false;
+                        if (!ok) {
+                            if (!suOnly) {
+                                showSuOnly();
+                            }
+                        } else if (suOnly) {
+                            refresh();
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private boolean suAlive() {
+        Process p = null;
+        try {
+            p = Runtime.getRuntime().exec(new String[]{"su", "-c", "id -u"});
+            BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            String line = r.readLine();
+            r.close();
+            p.waitFor();
+            return line != null && line.trim().equals("0");
+        } catch (Throwable t) {
+            return false;
+        } finally {
+            if (p != null) {
+                p.destroy();
+            }
+        }
+    }
+
+    private LinearLayout logCard() {
+        LinearLayout card = Ui.card(this);
+        card.addView(Ui.title(this, getString(R.string.adbng_log_title)));
+        card.addView(Ui.divider(this));
+        tvKlog = Ui.text(this, "", 10, Ui.INK);
+        tvKlog.setTypeface(Typeface.MONOSPACE);
+        tvKlog.setTextIsSelectable(true);
+        card.addView(tvKlog);
+        return card;
+    }
+
+    /** 内核模块日志的尾巴，给 AdbHide 页当诊断面板用。 */
+    private String tailLog() {
+        Process p = null;
+        try {
+            p = Runtime.getRuntime().exec(new String[]{"su", "-c",
+                    "tail -n 40 /data/adb/adbhide/kmod.log 2>/dev/null"});
+            BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = r.readLine()) != null) {
+                sb.append(line).append('\n');
+            }
+            r.close();
+            p.waitFor();
+            return sb.toString().trim();
+        } catch (Throwable t) {
+            return "";
+        } finally {
+            if (p != null) {
+                p.destroy();
+            }
+        }
+    }
+
     private void addBanner(String text, int fg, int bg) {
-        TextView t = Ui.text(this, text, 16, fg);
+        TextView t = Ui.text(this, text, 14, fg);
         t.setTypeface(Typeface.DEFAULT_BOLD);
         t.setPadding(dp(14), dp(12), dp(14), dp(12));
         t.setBackground(Ui.bg(bg, 12, this));
@@ -228,6 +315,7 @@ public class MainActivity extends Activity {
     private LinearLayout listBox;
     private LinearLayout missingBox;
     private TextView tvKernel;
+    private TextView tvKlog;
     private TextView tvNative;
     private TextView tvApp;
 
@@ -299,8 +387,8 @@ public class MainActivity extends Activity {
 
         body.addView(systemCard());
         body.addView(listCard());
-        body.addView(wirelessCard());
         body.addView(moduleCard());
+        body.addView(logCard());
 
         hint = Ui.text(this, "", 11, Ui.MUTED);
         hint.setPadding(dp(2), dp(2), 0, 0);
@@ -395,18 +483,6 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         card.addView(actions);
 
-        return card;
-    }
-
-    private LinearLayout wirelessCard() {
-        LinearLayout card = Ui.card(this);
-        card.addView(Ui.title(this, getString(R.string.title_wireless)));
-        card.addView(Ui.sub(this, getString(R.string.wireless_desc)));
-        TextView cmd = Ui.text(this,
-                getString(R.string.wireless_cmd), 12, Ui.MUTED);
-        cmd.setTypeface(Typeface.MONOSPACE);
-        cmd.setPadding(0, dp(8), 0, 0);
-        card.addView(cmd);
         return card;
     }
 
@@ -540,6 +616,7 @@ public class MainActivity extends Activity {
                     saveProps("expires", "0");
                 }
                 final State st = readState();
+                st.klog = tailLog();
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
@@ -671,24 +748,21 @@ public class MainActivity extends Activity {
 
         if (bannerBox != null) {
             bannerBox.removeAllViews();
-            if (!st.suOk) {
-                addBanner(getString(R.string.banner_su), BAN_FG_RED, BAN_BG_RED);
+            // LSPosed 层不通时内核层和 Native 层都不可能生效，只报这一条
+            if (!st.lspInst) {
+                addBanner(getString(R.string.banner_lsp_missing), BAN_FG_RED, BAN_BG_RED);
+            } else if (!st.lspOk) {
+                addBanner(getString(R.string.banner_lsp_scope), BAN_FG_RED, BAN_BG_RED);
             } else {
-                // 顺序固定：LSPosed -> 内核层 -> Native 层，每层最多一条
-                if (!st.lspInst) {
-                    addBanner(getString(R.string.banner_lsp_missing), BAN_FG_RED, BAN_BG_RED);
-                } else if (!st.lspOk) {
-                    addBanner(getString(R.string.banner_lsp_scope), BAN_FG_AMBER, BAN_BG_AMBER);
-                }
                 if (!st.kmodInst) {
                     addBanner(getString(R.string.banner_kmod_missing), BAN_FG_RED, BAN_BG_RED);
                 } else if (st.kmodDis) {
-                    addBanner(getString(R.string.banner_kmod_disabled), BAN_FG_GREEN, BAN_BG_GREEN);
+                    addBanner(getString(R.string.banner_kmod_disabled), BAN_FG_AMBER, BAN_BG_AMBER);
                 }
                 if (!st.nativeInst) {
                     addBanner(getString(R.string.banner_zygisk_missing), BAN_FG_RED, BAN_BG_RED);
                 } else if (st.nativeDis) {
-                    addBanner(getString(R.string.banner_zygisk_disabled), BAN_FG_GREEN, BAN_BG_GREEN);
+                    addBanner(getString(R.string.banner_zygisk_disabled), BAN_FG_AMBER, BAN_BG_AMBER);
                 }
             }
             bannerBox.setVisibility(bannerBox.getChildCount() == 0
@@ -701,6 +775,9 @@ public class MainActivity extends Activity {
         tvApp.setTextColor(Ui.OK);
 
         // 底部不再放状态诊断：状态全部由顶部横幅表达，这里只保留 syncList() 的短暂反馈
+        if (tvKlog != null) {
+            tvKlog.setText(st.klog.isEmpty() ? getString(R.string.adbng_no_log) : st.klog);
+        }
         hint.setText("");
     }
 
@@ -744,7 +821,9 @@ public class MainActivity extends Activity {
     }
 
     /** Configured entry that is not in the kernel list: no per-row status, no delete. */
-    private LinearLayout plainRow(String pkg) {
+    private LinearLayout plainRow(String raw) {
+        String pkg = pkgOnly(raw);
+        int user = userOf(raw);
         LinearLayout r = new LinearLayout(this);
         r.setOrientation(LinearLayout.HORIZONTAL);
         r.setGravity(Gravity.CENTER_VERTICAL);
@@ -768,8 +847,10 @@ public class MainActivity extends Activity {
                     .getApplicationLabel(getPackageManager().getApplicationInfo(pkg, 0)));
         } catch (Throwable ignored) {
         }
-        texts.addView(Ui.text(this, label, 15, Ui.INK));
-        TextView pkgView = Ui.text(this, pkg, 11, Ui.MUTED);
+        texts.addView(Ui.text(this, label + (user == 0 ? ""
+                : getString(R.string.picker_clone)), 15, Ui.INK));
+        TextView pkgView = Ui.text(this, user == 0 ? pkg
+                : pkg + " · uid " + userUid(pkg, user), 11, Ui.MUTED);
         pkgView.setTypeface(Typeface.MONOSPACE);
         texts.addView(pkgView);
         r.addView(texts, new LinearLayout.LayoutParams(0,
@@ -777,11 +858,24 @@ public class MainActivity extends Activity {
         return r;
     }
 
+    /** 分身那条的 uid：userId * 100000 + 机主侧的 appId。 */
+    private String userUid(String pkg, int user) {
+        try {
+            int uid0 = getPackageManager().getPackageUid(pkg, 0);
+            return String.valueOf(user * 100000 + uid0 % 100000);
+        } catch (Throwable t) {
+            return String.valueOf(user);
+        }
+    }
+
     private LinearLayout pkgRow(String uid, String pkg, boolean active) {
         return pkgRow(uid, pkg, active, R.string.pkg_missing);
     }
 
     private LinearLayout pkgRow(String uid, String pkg, boolean active, int inactiveRes) {
+        final String raw = pkg;
+        final String pkgName = pkgOnly(raw);
+        final int user = userOf(raw);
         LinearLayout r = new LinearLayout(this);
         r.setOrientation(LinearLayout.HORIZONTAL);
         r.setGravity(Gravity.CENTER_VERTICAL);
@@ -789,7 +883,7 @@ public class MainActivity extends Activity {
 
         ImageView icon = new ImageView(this);
         try {
-            icon.setImageDrawable(getPackageManager().getApplicationIcon(pkg));
+            icon.setImageDrawable(getPackageManager().getApplicationIcon(pkgName));
         } catch (Throwable ignored) {
             icon.setImageDrawable(null);
         }
@@ -800,21 +894,31 @@ public class MainActivity extends Activity {
         LinearLayout texts = new LinearLayout(this);
         texts.setOrientation(LinearLayout.VERTICAL);
 
-        String label = pkg;
+        boolean clone = user != 0;
+        try {
+            clone = Integer.parseInt(uid) >= 100000;
+        } catch (Throwable ignored) {
+        }
+
+        String label = pkgName;
         try {
             label = String.valueOf(getPackageManager()
-                    .getApplicationLabel(getPackageManager().getApplicationInfo(pkg, 0)));
+                    .getApplicationLabel(getPackageManager().getApplicationInfo(pkgName, 0)));
         } catch (Throwable ignored) {
+        }
+        if (clone) {
+            label += getString(R.string.picker_clone);
         }
 
         if (active) {
             texts.addView(Ui.text(this, label, 15, Ui.INK));
-            TextView pkgView = Ui.text(this, pkg, 11, Ui.MUTED);
+            TextView pkgView = Ui.text(this, pkgName, 11, Ui.MUTED);
             pkgView.setTypeface(Typeface.MONOSPACE);
             texts.addView(pkgView);
             texts.addView(Ui.text(this, "uid " + uid, 10, Ui.MUTED));
         } else {
-            TextView pkgView = Ui.text(this, pkg, 14, Ui.INK);
+            TextView pkgView = Ui.text(this, user == 0 ? pkgName
+                    : pkgName + " · uid " + userUid(pkgName, user), 14, Ui.INK);
             pkgView.setTypeface(Typeface.MONOSPACE);
             texts.addView(pkgView);
             texts.addView(Ui.text(this, getString(inactiveRes), 10, Ui.BAD));
@@ -828,7 +932,7 @@ public class MainActivity extends Activity {
             del.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    removePkg(pkg);
+                    removePkg(raw);
                 }
             });
             r.addView(del);
@@ -945,13 +1049,32 @@ public class MainActivity extends Activity {
         for (String pkg : st.confPkgs) {
             st.confTotal++;
             try {
-                getPackageManager().getPackageUid(pkg, 0);
+                getPackageManager().getPackageUid(pkgOnly(pkg), 0);
                 st.confResolved++;
             } catch (Throwable t) {
                 missing.add(pkg);
             }
         }
         return missing;
+    }
+
+    /** blacklist 里 pkg@userId 的包名部分。 */
+    private static String pkgOnly(String v) {
+        int i = v.indexOf('@');
+        return i < 0 ? v : v.substring(0, i);
+    }
+
+    /** blacklist 里 pkg@userId 的 userId 部分，裸包名算 0（机主）。 */
+    private static int userOf(String v) {
+        int i = v.indexOf('@');
+        if (i < 0) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(v.substring(i + 1).trim());
+        } catch (Throwable t) {
+            return 0;
+        }
     }
 
     private static String nz(String s) {
@@ -993,6 +1116,7 @@ public class MainActivity extends Activity {
         int confTotal;
         int confResolved;
         final List<String> uids = new ArrayList<String>();
+        String klog = "";
         final List<String> confPkgs = new ArrayList<String>();
         final List<String> pkgs = new ArrayList<String>();
         List<String> missing = new ArrayList<String>();
@@ -1006,11 +1130,22 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void removePkg(final String pkg) {
+    private void removePkg(final String raw) {
+        String pkg = pkgOnly(raw).replace("/", "");
+        String del;
+        if (raw.indexOf('@') >= 0) {
+            // 只删指定的那一条（某个分身）
+            del = "sed -i '\\#^" + raw + "$#d' $f";
+        } else {
+            // 裸包名代表所有实例，连同 pkg@userId 一起删
+            del = "sed -i '\\#^" + pkg + "$#d' $f; "
+                    + "sed -i '\\#^" + pkg + "@[0-9]*$#d' $f";
+        }
+        String script = "f=/data/adb/adbhide/blacklist.conf; " + del + "; "
+                + "if [ -f /data/adb/modules/adbhide_kmod/sync.sh ]; then "
+                + "sh /data/adb/modules/adbhide_kmod/sync.sh; fi";
         try {
-            Runtime.getRuntime().exec(new String[]{"su", "-c",
-                    "sed -i '/^" + pkg + "$/d' /data/adb/adbhide/blacklist.conf; "
-                            + "sh /data/adb/modules/adbhide_kmod/sync.sh"}).waitFor();
+            Runtime.getRuntime().exec(new String[]{"su", "-c", script}).waitFor();
         } catch (Throwable ignored) {
         }
         refresh();
