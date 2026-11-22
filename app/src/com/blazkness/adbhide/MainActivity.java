@@ -262,19 +262,30 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- layout
 
     private void buildUi() {
+        // 外层竖排：tab 条固定在顶部，只有下面的内容滚动
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setFitsSystemWindows(true);
+        root.setBackgroundColor(Ui.BG);
+
+        LinearLayout tabHost = new LinearLayout(this);
+        tabHost.setOrientation(LinearLayout.VERTICAL);
+        tabHost.setPadding(dp(16), dp(22), dp(16), 0);
+        tabHost.addView(Tabs.bar(this, true));
+        root.addView(tabHost);
+
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        scroll.setFitsSystemWindows(true);
         scroll.setBackgroundColor(Ui.BG);
-
         body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(dp(16), dp(22), dp(16), dp(30));
+        body.setPadding(dp(16), dp(16), dp(16), dp(30));
         scroll.addView(body, new ScrollView.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
-        setContentView(scroll);
-        body.addView(Tabs.bar(this, true));
+        root.addView(scroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        setContentView(root);
 
         new Thread(new Runnable() {
             @Override
